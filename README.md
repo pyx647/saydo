@@ -14,13 +14,35 @@
 
 ## 启动
 
+**主力版本是 Rust / Tauri**（单个 exe，内存小、启动快）。这台电脑的 Smart App Control 会拦截本机新编译的程序，所以**在 GitHub Actions 上编译**，下载产物使用：
+
 ```powershell
-cd <项目目录>\saydo
-pythonw saydo.pyw          # 无控制台，托盘常驻；首次运行会打开设置页
+gh run download <run-id> --repo pyx647/saydo -n SayDo-windows -D build   # 得到 saydo.exe 和 NSIS 安装包
 ```
 
-需要：Python 3.13（已装）、`numpy onnxruntime pillow pywin32 psutil`（见 `requirements.txt`，均已装）、Microsoft Edge、至少一个 CLI（Claude Code / Codex / agy）。
-本地语音模型已在 `%APPDATA%\com.user.saydo\stt-model\`；别的机器在 设置 → 语音 里一键下载。开机自启在 设置 → 常规。
+首次运行会打开设置页。语音模型在 `%APPDATA%\com.user.saydo\stt-model\`（别的机器在 设置 → 语音 里一键下载）。需要至少一个 CLI（Claude Code / Codex / agy）。
+
+> 原 Python 版（`app/`、`saydo.pyw`）仍保留，功能更少，不再维护。
+
+## 速度与内存（本机实测）
+
+| 项 | 数值 |
+|---|---|
+| Claude Code，一次性调用（继承全部 MCP/Skills） | 约 9.5 秒 |
+| Claude Code，常驻进程，每条 | 约 2~3 秒（启动时静默预热，第一个任务也是热的） |
+| Codex，一次性 `exec` | 约 10~12 秒 |
+| Codex，常驻 `app-server`，每条 | 约 1.5~3 秒 |
+| `saydo.exe` 空闲内存 | 约 10 MB（语音模型按需加载、闲置 5 分钟卸载） |
+| 面板 WebView2 | 约 160~180 MB |
+| 常驻的 Claude Code 进程 | 约 600 MB（要连你的全部 MCP 和 Skills）；选哪个后端就只常驻哪个 |
+
+## 记忆
+
+设置 → 记忆：写一次"关于我"，再加"记住的事"。按住热键说"记住：……"随口添加，说"忘掉……"删除（本地直接处理，瞬间完成）。每条指令发给 Agent 时都会带上。
+
+## 取消
+
+聆听、识别、执行的任何阶段按 **Esc** 取消整个任务；聆听时字幕实时显示，说错了当场就能看到。
 
 ## 为什么主力是 Code CLI
 

@@ -330,7 +330,7 @@ function Safety({ cfg, patch }: { cfg: Config; patch: (p: Partial<Config>) => vo
         <Row label="允许 Codex 操作整台电脑" hint="关闭后 Codex 只能写 SayDo 的工作目录，无法把文件移到别的文件夹。">
           <Toggle on={cfg.fullAccess} onChange={(v) => patch({ fullAccess: v })} />
         </Row>
-        <Row label="常驻预热（强烈建议）" hint="选中的后端（Claude Code 或 Codex）会在 SayDo 启动时就常驻起来：Claude Code 冷启动 7~10 秒 → 之后约 3 秒；Codex 约 12 秒 → 之后约 2.5~4.5 秒。只常驻当前选中的那一个，切换后端会自动换。代价是常驻约 300 MB 内存，并且每 10 个任务自动换新对话以免上下文累积。">
+        <Row label="常驻预热（强烈建议）" hint="选中的后端（Claude Code 或 Codex）会在 SayDo 启动时就常驻起来：Claude Code 冷启动 7~10 秒 → 之后约 3 秒；Codex 约 12 秒 → 之后约 2.5~4.5 秒。只常驻当前选中的那一个，切换后端会自动换。代价是常驻进程约 600 MB 内存（它要连你的全部 MCP 和 Skills），并且每 10 个任务自动换新对话以免上下文累积。">
           <Toggle on={cfg.warmClaude} onChange={(v) => patch({ warmClaude: v })} />
         </Row>
         <Row label="保留我在 ~/.claude 里配置的 hooks" hint="默认关闭：这类 hooks（会话启动/结束脚本）会让每次调用多花 10 秒以上。MCP 和 Skills 不受影响。">
