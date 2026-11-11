@@ -1,0 +1,5 @@
+numpy
+onnxruntime
+pillow
+pywin32
+psutil
