@@ -272,7 +272,7 @@ fn now_ms() -> u64 {
 pub fn preload(app: &AppHandle) {
     if model_ready(app) {
         LAST_USED.store(now_ms(), Ordering::Relaxed);
-        let _ = get_session(app);
+        drop(get_session(app));
     }
 }
 

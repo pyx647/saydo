@@ -161,6 +161,15 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
             dirs.push(d.to_path_buf());
         }
     } else {
+        if let Some(sp) = &inp.shot_saved {
+            ctx.push_str(&format!(
+                "- 按下热键时自动保存了一张屏幕截图：`{}`（我没看过它；只有任务确实要看屏幕时才读取，用不到就别读）\n",
+                sp.display()
+            ));
+            if let Some(d) = sp.parent() {
+                dirs.push(d.to_path_buf());
+            }
+        }
         match &inp.sel {
             Selection::None => ctx.push_str("- 选中内容：无\n"),
             Selection::Text(t) => {
