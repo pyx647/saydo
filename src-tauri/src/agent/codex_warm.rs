@@ -154,7 +154,7 @@ fn ensure(app: &AppHandle, cfg: &Config) -> Result<bool, String> {
     // 握手
     let rx_g = w.rx.lock().unwrap();
     let rx = rx_g.as_ref().ok_or("Codex 事件通道未就绪")?;
-    let r = call(w, rx, None, "initialize", json!({ "clientInfo": { "name": "saydo", "version": env!("CARGO_PKG_VERSION") }, "capabilities": { "experimentalApi": true } }), Duration::from_secs(30));
+    let r = call(w, rx, None, "initialize", json!({ "clientInfo": { "name": "saydo", "version": env!("CARGO_PKG_VERSION") }, "capabilities": { "experimentalApi": true, "mcpServerOpenaiFormElicitation": true, "extensions": { "openai/form": {} } } }), Duration::from_secs(30));
     if let Err(e) = r {
         drop(rx_g);
         kill_locked(&mut w.proc.lock().unwrap());
@@ -336,7 +336,7 @@ pub fn ask(app: &AppHandle, cfg: &Config, prompt: &str, sink: &Sink) -> Result<S
                 // Codex 主动向我们要授权 / 要用户输入（比如 Google Drive 连接器上传文件前要确认）：
                 // 弹 SayDo 的确认卡问用户，再把答案回给 Codex。之前这里一律拒绝，用户根本看不到弹窗，任务就卡在"请确认"上。
                 if v.get("id").is_some() {
-                    crate::log::log(&format!("codex asks: {m}"));
+                    crate::log::log(&format!("codex asks: {m} mode={} msg={}", v["params"]["mode"].as_str().unwrap_or("-"), claude_trunc(v["params"]["message"].as_str().unwrap_or(""), 120)));
                     sink.step("等你确认…");
                     let reply = answer_request(app, m, &v["params"]);
                     crate::ui::interactive(app, false); // 回到"执行中"的不抢焦点状态
