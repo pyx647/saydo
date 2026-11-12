@@ -290,3 +290,117 @@ pub fn save_image(img: &image::RgbaImage, dir: &Path) -> Result<PathBuf, String>
 pub fn screenshot(fg_hwnd: isize, cursor: (i32, i32), dir: &Path) -> Result<PathBuf, String> {
     save_image(&grab_image(fg_hwnd, cursor)?, dir)
 }
+
+
+// ───────────────────────── Office：前台打开的是哪份文档 ─────────────────────────
+
+const PPT_SCRIPT: &str = r#"
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+$ErrorActionPreference='Stop'
+try{ $app=[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application') }catch{ exit 0 }
+if($app.Presentations.Count -lt 1){ exit 0 }
+$p=$app.ActivePresentation
+$o=[ordered]@{path=$p.FullName;saved=[bool]$p.Saved;slides=[int]$p.Slides.Count}
+try{ $o.slide=[int]$app.ActiveWindow.View.Slide.SlideIndex }catch{}
+try{ $sel=$app.ActiveWindow.Selection
+  if($sel.Type -eq 2){ $o.shapes=@($sel.ShapeRange | ForEach-Object { $_.Name }) }
+  if($sel.Type -eq 3){ $o.text=[string]$sel.TextRange.Text } }catch{}
+$o | ConvertTo-Json -Compress
+"#;
+
+const WORD_SCRIPT: &str = r#"
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+$ErrorActionPreference='Stop'
+try{ $app=[Runtime.InteropServices.Marshal]::GetActiveObject('Word.Application') }catch{ exit 0 }
+if($app.Documents.Count -lt 1){ exit 0 }
+$d=$app.ActiveDocument
+$o=[ordered]@{path=$d.FullName;saved=[bool]$d.Saved}
+try{ $o.pages=[int]$d.ComputeStatistics(2) }catch{}
+try{ $t=[string]$app.Selection.Text; if($t.Trim().Length -gt 0){ $o.text=$t } }catch{}
+$o | ConvertTo-Json -Compress
+"#;
+
+const EXCEL_SCRIPT: &str = r#"
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+$ErrorActionPreference='Stop'
+try{ $app=[Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application') }catch{ exit 0 }
+if($app.Workbooks.Count -lt 1){ exit 0 }
+$b=$app.ActiveWorkbook
+$o=[ordered]@{path=$b.FullName;saved=[bool]$b.Saved}
+try{ $o.sheet=[string]$app.ActiveSheet.Name }catch{}
+try{ $o.range=[string]$app.Selection.Address($false,$false) }catch{}
+$o | ConvertTo-Json -Compress
+"#;
+
+/// 前台是 PowerPoint / Word / Excel 时，问一下它"现在打开的是哪份文档、当前页 / 选区是什么"，
+/// 让 Agent 知道"这个 PPT / 这份文档"指的是哪一份，直接改它而不是另做一个新文件。
+/// 返回一行可直接放进提示词的描述；没有可用文档 / 超时返回 None。（在按下热键时并行取，不增加等待）
+pub fn office_context(exe: &str) -> Option<String> {
+    use base64::Engine;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let (prog, script) = match exe.to_lowercase().as_str() {
+        "powerpnt.exe" => ("PowerPoint", PPT_SCRIPT),
+        "winword.exe" => ("Word", WORD_SCRIPT),
+        "excel.exe" => ("Excel", EXCEL_SCRIPT),
+        _ => return None,
+    };
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let enc = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let child = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &enc])
+        .creation_flags(0x0800_0000)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()
+        .ok()?;
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    let out = match rx.recv_timeout(std::time::Duration::from_secs(6)) {
+        Ok(Ok(o)) => o,
+        _ => {
+            let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).creation_flags(0x0800_0000).output();
+            return None;
+        }
+    };
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let path = v["path"].as_str().unwrap_or("");
+    let mut parts: Vec<String> = vec![];
+    if let Some(n) = v["slides"].as_i64() {
+        parts.push(format!("共 {n} 页"));
+    }
+    if let Some(n) = v["slide"].as_i64() {
+        parts.push(format!("光标在第 {n} 页"));
+    }
+    if let Some(n) = v["pages"].as_i64() {
+        parts.push(format!("共 {n} 页"));
+    }
+    if let Some(a) = v["shapes"].as_array() {
+        let names: Vec<&str> = a.iter().filter_map(|x| x.as_str()).collect();
+        if !names.is_empty() {
+            parts.push(format!("选中了形状：{}", names.join("、")));
+        }
+    }
+    if let Some(t) = v["text"].as_str() {
+        let t: String = t.chars().take(200).collect();
+        if !t.trim().is_empty() {
+            parts.push(format!("选中的文字：「{}」", t.trim()));
+        }
+    }
+    if let Some(sh) = v["sheet"].as_str() {
+        parts.push(format!("当前工作表：{sh}"));
+    }
+    if let Some(r) = v["range"].as_str() {
+        parts.push(format!("选中区域：{r}"));
+    }
+    if v["saved"] == false {
+        parts.push("有未保存的修改".into());
+    }
+    let shown = if path.is_empty() { "（还没保存过的新文档）".to_string() } else { format!("`{path}`") };
+    Some(format!("- 前台是 {prog}，用户正在编辑的文档：{shown}（{}）\n", parts.join("；")))
+}

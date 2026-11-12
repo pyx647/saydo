@@ -26,6 +26,9 @@ pub struct Session {
     /// 按下热键时自动保存的截图（只保存、不读取）
     pub shot: Mutex<Option<PathBuf>>,
     pub shot_ready: AtomicBool,
+    /// 前台 Office 文档的描述（按下热键时并行取好）
+    pub doc: Mutex<Option<String>>,
+    pub doc_ready: AtomicBool,
 }
 
 static CUR: OnceLock<Mutex<Option<Arc<Session>>>> = OnceLock::new();
@@ -156,9 +159,22 @@ pub fn on_down(app: AppHandle) {
             screen: AtomicBool::new(false),
             shot: Mutex::new(None),
             shot_ready: AtomicBool::new(false),
+            doc: Mutex::new(None),
+            doc_ready: AtomicBool::new(false),
         });
         *cur().lock().unwrap() = Some(s.clone());
         tools::reset_allow();
+        // 前台是 Office：并行问它"现在开的是哪份文档"（不增加等待）；追问沿用上一轮的
+        if from_self {
+            *s.doc.lock().unwrap() = prev.as_ref().and_then(|p| p.doc.lock().unwrap().clone());
+            s.doc_ready.store(true, Ordering::SeqCst);
+        } else {
+            let (s6, exe) = (s.clone(), s.fg.exe.clone());
+            std::thread::spawn(move || {
+                *s6.doc.lock().unwrap() = capture::office_context(&exe);
+                s6.doc_ready.store(true, Ordering::SeqCst);
+            });
+        }
         crate::log::log(&format!("session {seq}: down, fg={} follow_up={}", s.fg.exe, from_self));
 
         match audio::start(app.clone()) {
@@ -321,6 +337,8 @@ pub fn panel_submit(app: AppHandle, text: String) {
                 screen: AtomicBool::new(false),
                 shot: Mutex::new(None),
                 shot_ready: AtomicBool::new(true),
+                doc: Mutex::new(None),
+                doc_ready: AtomicBool::new(true),
             });
             *cur().lock().unwrap() = Some(s.clone());
             s
@@ -422,11 +440,17 @@ fn run_instruction(app: &AppHandle, s: Arc<Session>, text: String) {
     }
 
     let ctx_label = ui::ctx_view(&s.fg, &sel_used, shot.is_some()).label;
-    let input = RunInput { instruction: text.clone(), fg: s.fg.clone(), sel: sel_used, shot, shot_saved, dest, prev: s.last.lock().unwrap().clone() };
+    wait_for(|| s.doc_ready.load(Ordering::SeqCst), 2000);
+    let doc_ctx = s.doc.lock().unwrap().clone();
+    // 每个任务一个专用临时文件夹（放在 Agent 的工作目录里，不用额外授权）
+    let scratch = agent::workspace_dir(app).join("scratch").join(format!("{}", history::now()));
+    let _ = std::fs::create_dir_all(&scratch);
+    let input = RunInput { instruction: text.clone(), fg: s.fg.clone(), sel: sel_used, shot, shot_saved, doc_ctx, scratch: Some(scratch.clone()), dest, prev: s.last.lock().unwrap().clone() };
     let sink = Sink::new(app.clone(), cancel.clone());
     sink.step("思考中…");
     let t0 = Instant::now();
     let res = tauri::async_runtime::block_on(agent::run(app, &cfg, input, &sink));
+    cleanup_scratch(&scratch, res.as_ref().ok().map(|o| o.files.as_slice()).unwrap_or(&[]));
     if cancel.load(Ordering::SeqCst) {
         return;
     }
@@ -460,6 +484,31 @@ fn run_instruction(app: &AppHandle, s: Arc<Session>, text: String) {
     }
 }
 
+/// 任务结束后清掉这个任务的临时文件夹，并顺手清理超过 6 小时的旧残留。
+/// 如果 Agent 把成品也放进了临时文件夹（结果文件在里面），就保留，免得删掉用户要的东西。
+fn cleanup_scratch(scratch: &std::path::Path, result_files: &[String]) {
+    let sc = scratch.to_string_lossy().to_lowercase();
+    if result_files.iter().any(|f| f.to_lowercase().starts_with(&sc)) {
+        crate::log::log(&format!("scratch kept (contains a result file): {}", scratch.display()));
+        return;
+    }
+    let dir = scratch.to_path_buf();
+    std::thread::spawn(move || {
+        let _ = std::fs::remove_dir_all(&dir);
+        if let Some(parent) = dir.parent() {
+            let now = history::now();
+            if let Ok(rd) = std::fs::read_dir(parent) {
+                for e in rd.flatten() {
+                    let stale = e.file_name().to_string_lossy().parse::<u64>().map(|t| now.saturating_sub(t) > 6 * 3600).unwrap_or(false);
+                    if stale {
+                        let _ = std::fs::remove_dir_all(e.path());
+                    }
+                }
+            }
+        }
+    });
+}
+
 /// 记忆指令的回执：一张很小的结果卡
 fn memory_reply(app: &AppHandle, instruction: &str, text: String) {
     use tauri::Emitter;
@@ -486,6 +535,8 @@ pub async fn test_backend(app: AppHandle, backend: Option<String>) -> Result<Str
         sel: Selection::None,
         shot: None,
         shot_saved: None,
+        doc_ctx: None,
+        scratch: None,
         dest: None,
         prev: None,
     };

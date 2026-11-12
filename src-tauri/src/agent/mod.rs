@@ -25,6 +25,10 @@ pub struct RunInput {
     pub shot: Option<PathBuf>,
     /// 按下热键时自动保存的截图：只告诉 agent 有这张图，需要时再读
     pub shot_saved: Option<PathBuf>,
+    /// 前台是 Office 时，正在打开的那份文档的描述（路径 / 当前页 / 选区）
+    pub doc_ctx: Option<String>,
+    /// 这个任务专用的临时文件夹：所有中间产物放这里，任务结束后 SayDo 自动删除
+    pub scratch: Option<PathBuf>,
     /// 用户在弹窗里预先选定的目标文件夹
     pub dest: Option<String>,
     /// 上一轮 (用户指令, 回答)，用于追问
@@ -197,6 +201,13 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
         }
     }
 
+    if let Some(d) = &inp.doc_ctx {
+        ctx.push_str(d);
+    }
+
+    if let Some(sd) = &inp.scratch {
+        dirs.push(sd.clone());
+    }
     if let Some(d) = &inp.dest {
         ctx.push_str(&format!("- 目标文件夹：用户已在弹窗里选定 `{d}`，直接使用，不要再问。\n"));
         dirs.push(PathBuf::from(d));
@@ -227,6 +238,15 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
     }
     p.push_str("4. 你本机配好的所有 MCP（Gmail / Drive / 日历 / Sheets 等）和 Skills 都可以用来完成任务。\n");
     p.push_str("5. 如果你创建、移动、重命名或修改了文件，在回答的最后每个文件单独一行写：`FILE: <绝对路径>`（这些行会被弹窗渲染成\"打开 / 定位\"按钮）。\n");
+    if let Some(sd) = &inp.scratch {
+        p.push_str(&format!(
+            "7. **文件放哪里**：这个任务有专用的临时文件夹 `{}`。所有中间产物（草稿、测试图、转换过程里的文件、临时脚本、反复修改的版本）一律放在这个文件夹里，任务结束后 SayDo 会自动清理它；**绝对不要把中间文件放到桌面、下载或文档里**。只有最终成品才放到用户要的位置：有原文件就放原文件同一目录；没有原文件时，放进 `文档\\SayDo输出\\<任务名>\\`（一个任务一个子文件夹），**不要放桌面**。成品只留用户真正要的那几个文件，不要留多个版本。\n",
+            sd.display()
+        ));
+    }
+    if inp.doc_ctx.is_some() {
+        p.push_str("6. 上面的 Office 文档就是用户说的\"这个 PPT / 这份文档 / 这个表格 / 这一页\"。要修改它，就**直接改这份正在打开的文档**：用 PowerShell 的 COM（`[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')`，Word / Excel 同理）操作已打开的对象，改动会立刻出现在用户眼前。**不要新建另一个文件，不要另存为副本，不要改磁盘上的同名文件**，除非用户明确说了\"另存 / 复制一份 / 新建\"。改完不要自动保存或关闭文档，除非用户要求。COM 连不上就如实告诉用户原因，不要悄悄改做一个新文件。\n");
+    }
     if !cfg.extra_prompt.trim().is_empty() {
         p.push_str(&format!("\n## 用户的常驻偏好\n{}\n", cfg.extra_prompt.trim()));
     }
