@@ -259,6 +259,7 @@ async fn run_codex(app: &AppHandle, cfg: &Config, inp: &RunInput, sink: &Sink) -
     // TOML 字面量字符串（单引号）：Windows 路径里的反斜杠不用转义
     args.extend(["-c".into(), format!("mcp_servers.saydo.command='{}'", me.to_string_lossy())]);
     args.extend(["-c".into(), "mcp_servers.saydo.args=['--mcp']".into()]);
+    args.extend(["-c".into(), "mcp_servers.saydo.tool_timeout_sec=600".into()]);
     args.extend(["-C".into(), ws.to_string_lossy().to_string()]);
     args.extend(["-m".into(), cfg.codex_model()]);
     args.extend(["-c".into(), format!("model_reasoning_effort=\"{}\"", cfg.codex_effort())]);

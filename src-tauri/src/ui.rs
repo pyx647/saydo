@@ -8,7 +8,7 @@ use crate::capture::{FgInfo, Selection};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -229,6 +229,19 @@ fn pending() -> &'static Mutex<HashMap<String, Sender<Value>>> {
 }
 static ASK_ID: AtomicU64 = AtomicU64::new(1);
 
+/// 当前有几张"向用户提问"的卡片在等回答。有的时候，进度推送（Sink）必须停，
+/// 否则它每 0.4 秒推一次"执行中"，会把刚弹出的确认卡立刻清掉，用户根本看不到。
+static ASKS_OPEN: AtomicUsize = AtomicUsize::new(0);
+pub fn ask_pending() -> bool {
+    ASKS_OPEN.load(Ordering::Relaxed) > 0
+}
+struct AskGuard;
+impl Drop for AskGuard {
+    fn drop(&mut self) {
+        ASKS_OPEN.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// 阻塞等待用户在弹窗里作答。spec 至少含 kind/title；返回前端回传的 value。
 pub fn ask(app: &AppHandle, mut spec: Value) -> Result<Value, String> {
     let id = format!("ask{}", ASK_ID.fetch_add(1, Ordering::Relaxed));
@@ -239,6 +252,8 @@ pub fn ask(app: &AppHandle, mut spec: Value) -> Result<Value, String> {
     if spec["kind"] == "folder" && spec.get("suggestions").is_none() {
         spec["suggestions"] = json!(folder_suggestions());
     }
+    ASKS_OPEN.fetch_add(1, Ordering::Relaxed);
+    let _guard = AskGuard; // 函数结束（回答 / 超时 / 取消）时自动减一
     if !panel_visible(app) {
         show_panel_at(app, crate::capture::cursor_xy());
     }

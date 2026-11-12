@@ -72,7 +72,7 @@ impl Sink {
         self.cancel.load(Ordering::SeqCst)
     }
     fn flush(&self, st: &mut SinkState, force: bool) {
-        if self.silent {
+        if self.silent || crate::ui::ask_pending() {
             return;
         }
         if !force && st.last_emit.elapsed().as_millis() < 90 {

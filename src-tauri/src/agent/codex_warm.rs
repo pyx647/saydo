@@ -117,6 +117,8 @@ fn ensure(app: &AppHandle, cfg: &Config) -> Result<bool, String> {
         // TOML 字面量字符串（单引号）：Windows 路径里的反斜杠不用转义
         args.extend(["-c".into(), format!("mcp_servers.saydo.command='{}'", me.to_string_lossy())]);
         args.extend(["-c".into(), "mcp_servers.saydo.args=['--mcp']".into()]);
+        // Codex 对 MCP 工具调用有超时（实测日志：timed out awaiting tools/call）；confirm / pick_folder 要等人，放宽到 10 分钟
+        args.extend(["-c".into(), "mcp_servers.saydo.tool_timeout_sec=600".into()]);
         args.extend(cfg.codex.extra_args.split_whitespace().map(|x| x.to_string()));
         let mut cmd = Command::new(&exe);
         {
