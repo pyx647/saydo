@@ -463,7 +463,7 @@ fn run_instruction(app: &AppHandle, s: Arc<Session>, text: String) {
 /// 记忆指令的回执：一张很小的结果卡
 fn memory_reply(app: &AppHandle, instruction: &str, text: String) {
     use tauri::Emitter;
-    let _ = app.emit("config-changed", json!({}));
+    let _ = app.emit("memories-changed", json!({}));
     if !ui::panel_visible(app) {
         ui::show_panel_at(app, capture::cursor_xy());
     }

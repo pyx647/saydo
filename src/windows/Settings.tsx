@@ -349,8 +349,12 @@ function Safety({ cfg, patch }: { cfg: Config; patch: (p: Partial<Config>) => vo
 
 function Memory({ cfg, patch }: { cfg: Config; patch: (p: Partial<Config>) => void }) {
   const [draft, setDraft] = useState("");
-  // 语音"记住……"在后端写入配置后会广播 config-changed：重新读取，列表马上更新
-  useEffect(() => listenSync("config-changed", () => api.getConfig().then((c) => patch({ memories: c.memories, profile: c.profile }))), [patch]);
+  // 语音"记住……"在后端写入后会广播 memories-changed：只刷新「记住的事」列表。
+  // 绝不碰「关于我」，也不监听 config-changed——保存本身会触发 config-changed，
+  // 之前正是"保存 → 重新读取 → 覆盖输入框 → 再保存"这个回路会把正在输入的内容冲掉。
+  useEffect(() => listenSync("memories-changed", () => api.getConfig().then((c) => patch({ memories: c.memories }))), [patch]);
+  const [dir, setDir] = useState("");
+  useEffect(() => { api.appInfo().then((i) => setDir(i.configDir)).catch(() => {}); }, []);
   const add = () => {
     const t = draft.trim();
     if (!t || cfg.memories.includes(t)) return;
@@ -360,6 +364,10 @@ function Memory({ cfg, patch }: { cfg: Config; patch: (p: Partial<Config>) => vo
   return (
     <>
       <Card title="关于我" desc="告诉 SayDo 你是谁、在哪、做什么，写一次就行，之后每条指令它都知道，不用再解释。">
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
+          每次修改前都会自动备份旧内容（保留最近 30 份）。
+          {dir && <> <button className="s-btn" onClick={() => api.openPath(dir + "\\backups").catch(() => {})}>打开备份文件夹</button></>}
+        </div>
         <textarea
           className="s-input" rows={6} value={cfg.profile} onChange={(e) => patch({ profile: e.target.value })}
           placeholder={"例如：我叫小明，在某大学做生物信息研究。常用语言：中文、英文。\n文件主要放在 D:\\Work。回答尽量简短，翻译默认译成中文。"}

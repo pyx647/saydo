@@ -135,6 +135,7 @@ pub fn config_dir_static() -> PathBuf {
 }
 
 pub fn load(app: &AppHandle) {
+    let _ = std::fs::create_dir_all(config_dir(app).join("backups"));
     let p = config_dir(app).join("config.json");
     if let Ok(s) = std::fs::read_to_string(&p) {
         if let Ok(c) = serde_json::from_str::<Config>(s.trim_start_matches('\u{feff}')) {
@@ -143,8 +144,36 @@ pub fn load(app: &AppHandle) {
     }
 }
 
+/// 「关于我」或「记住的事」要被改动 / 清空之前，先把旧内容存一份到 backups/（只存这两项，不含 API Key；保留最近 30 份）
+fn backup_memory_if_changed(dir: &std::path::Path, file: &std::path::Path, new: &Config) {
+    let Ok(old) = std::fs::read_to_string(file) else { return };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(old.trim_start_matches('\u{feff}')) else { return };
+    let old_profile = v["profile"].as_str().unwrap_or("").to_string();
+    let old_mem: Vec<String> = v["memories"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    if (old_profile == new.profile && old_mem == new.memories) || (old_profile.trim().is_empty() && old_mem.is_empty()) {
+        return;
+    }
+    let bdir = dir.join("backups");
+    if std::fs::create_dir_all(&bdir).is_err() {
+        return;
+    }
+    let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let body = serde_json::json!({ "profile": old_profile, "memories": old_mem });
+    let _ = std::fs::write(bdir.join(format!("memory-{ts}.json")), serde_json::to_string_pretty(&body).unwrap_or_default());
+    if let Ok(rd) = std::fs::read_dir(&bdir) {
+        let mut names: Vec<_> = rd.flatten().map(|e| e.path()).filter(|p| p.file_name().map(|n| n.to_string_lossy().starts_with("memory-")).unwrap_or(false)).collect();
+        names.sort();
+        if names.len() > 30 {
+            for p in &names[..names.len() - 30] {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+}
+
 pub fn save(app: &AppHandle, c: Config) -> Result<(), String> {
     let p = config_dir(app).join("config.json");
+    backup_memory_if_changed(&config_dir(app), &p, &c);
     let s = serde_json::to_string_pretty(&c).map_err(|e| e.to_string())?;
     std::fs::write(&p, s).map_err(|e| e.to_string())?;
     *cell().write().unwrap() = c;
