@@ -179,6 +179,85 @@ pub fn prewarm(app: &AppHandle, cfg: &Config) {
     }
 }
 
+/// 弹确认卡；用户点"允许"= Some(true)，"拒绝" = Some(false)，被取消（Esc / ×）= None
+fn confirm_card(app: &AppHandle, title: String, detail: String, danger: bool) -> Option<bool> {
+    crate::ui::ask(app, json!({ "kind": "confirm", "title": title, "detail": detail, "danger": danger }))
+        .ok()
+        .map(|v| v["ok"].as_bool().unwrap_or(false))
+}
+
+/// 回答 Codex 发来的服务器请求（协议见 `codex app-server generate-json-schema`）。
+/// 返回 {"result": …} 或 {"error": …}
+fn answer_request(app: &AppHandle, method: &str, p: &Value) -> Value {
+    let reason = p["reason"].as_str().unwrap_or("").to_string();
+    match method {
+        "item/commandExecution/requestApproval" => {
+            let cmd = p["command"].as_str().unwrap_or("");
+            let detail = format!("{}{}", claude_trunc(cmd, 400), if reason.is_empty() { String::new() } else { format!("\n{reason}") });
+            let d = match confirm_card(app, "允许 Codex 运行这条命令？".into(), detail, true) {
+                Some(true) => "accept",
+                Some(false) => "decline",
+                None => "cancel",
+            };
+            json!({ "result": { "decision": d } })
+        }
+        "item/fileChange/requestApproval" => {
+            let detail = if reason.is_empty() { p["grantRoot"].as_str().unwrap_or("").to_string() } else { reason };
+            let d = match confirm_card(app, "允许 Codex 修改文件？".into(), detail, true) {
+                Some(true) => "accept",
+                Some(false) => "decline",
+                None => "cancel",
+            };
+            json!({ "result": { "decision": d } })
+        }
+        "item/permissions/requestApproval" => {
+            let ok = confirm_card(app, "允许 Codex 获得额外权限？".into(), reason, true).unwrap_or(false);
+            if ok {
+                json!({ "result": { "permissions": p["permissions"].clone(), "scope": "turn" } })
+            } else {
+                json!({ "result": { "permissions": {} } })
+            }
+        }
+        "mcpServer/elicitation/request" => {
+            let msg = p["message"].as_str().unwrap_or("需要你确认").to_string();
+            if p["mode"] == "url" {
+                // 要用户去某个网址授权：确认后用浏览器打开，再告诉 Codex 已处理
+                let url = p["url"].as_str().unwrap_or("").to_string();
+                let ok = confirm_card(app, "需要在浏览器里授权".into(), format!("{msg}\n{url}"), false).unwrap_or(false);
+                if ok && !url.is_empty() {
+                    let _ = crate::ui::open_path(url);
+                }
+                return json!({ "result": { "action": if ok { "accept" } else { "decline" }, "content": null } });
+            }
+            // 表单：没有必填项 = 纯"允许 / 不允许"的确认（连接器执行有副作用的操作前常见）；有必填项我们渲染不了，只能拒绝
+            let has_required = p.pointer("/requestedSchema/required").and_then(Value::as_array).map(|a| !a.is_empty()).unwrap_or(false);
+            if has_required {
+                return json!({ "result": { "action": "decline", "content": null } });
+            }
+            match confirm_card(app, "需要你确认".into(), msg, false) {
+                Some(true) => json!({ "result": { "action": "accept", "content": {} } }),
+                Some(false) => json!({ "result": { "action": "decline", "content": null } }),
+                None => json!({ "result": { "action": "cancel", "content": null } }),
+            }
+        }
+        "item/tool/requestUserInput" => {
+            let mut answers = serde_json::Map::new();
+            for q in p["questions"].as_array().cloned().unwrap_or_default() {
+                let title = q["question"].as_str().unwrap_or("请选择").to_string();
+                let opts: Vec<String> = q["options"].as_array().map(|a| a.iter().filter_map(|o| o["label"].as_str().map(String::from)).collect()).unwrap_or_default();
+                let kind = if opts.is_empty() { "text" } else { "choice" };
+                let v = crate::ui::ask(app, json!({ "kind": kind, "title": title, "options": opts }));
+                let val = v.ok().and_then(|x| x["value"].as_str().map(String::from)).unwrap_or_default();
+                if let Some(id) = q["id"].as_str() {
+                    answers.insert(id.to_string(), json!({ "answers": [val] }));
+                }
+            }
+            json!({ "result": { "answers": answers } })
+        }
+        _ => json!({ "error": { "code": -32601, "message": "SayDo 不支持此请求" } }),
+    }
+}
+
 fn friendly_item(it: &Value) -> Option<String> {
     let ty = it["type"].as_str().unwrap_or("");
     match ty {
@@ -254,9 +333,20 @@ pub fn ask(app: &AppHandle, cfg: &Config, prompt: &str, sink: &Sink) -> Result<S
                     continue;
                 }
                 let Some(m) = v["method"].as_str() else { continue };
-                // 服务器主动请求（授权等）：策略是 never，理论上不会来；来了就拒绝，免得卡死
+                // Codex 主动向我们要授权 / 要用户输入（比如 Google Drive 连接器上传文件前要确认）：
+                // 弹 SayDo 的确认卡问用户，再把答案回给 Codex。之前这里一律拒绝，用户根本看不到弹窗，任务就卡在"请确认"上。
                 if v.get("id").is_some() {
-                    let _ = write_line(w, json!({ "id": v["id"], "error": { "code": -32601, "message": "SayDo 不处理此请求" } }));
+                    crate::log::log(&format!("codex asks: {m}"));
+                    sink.step("等你确认…");
+                    let reply = answer_request(app, m, &v["params"]);
+                    crate::ui::interactive(app, false); // 回到"执行中"的不抢焦点状态
+                    let mut msg = json!({ "id": v["id"] });
+                    if let Some(r) = reply.get("result") {
+                        msg["result"] = r.clone();
+                    } else {
+                        msg["error"] = reply["error"].clone();
+                    }
+                    let _ = write_line(w, msg);
                     continue;
                 }
                 match m {
