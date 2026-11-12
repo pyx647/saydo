@@ -331,15 +331,59 @@ pub async fn browse_folder(app: AppHandle, start: Option<String>) -> Option<Stri
 
 // ───────────────────────── 文件操作（弹窗里的按钮） ─────────────────────────
 
+/// 解码 %XX（链接里的路径常被 URL 编码）
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() + 0 {
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// 点击回答里的链接 / 文件：
+///  - http(s) → 系统默认浏览器
+///  - 本地路径（C:/x、C:\x、file:///x，可能带 URL 编码）→ 默认程序打开
+///  - 可执行 / 脚本类文件**不运行**，只在资源管理器里定位（链接内容来自模型输出，不能当可信指令）
+/// 一律经 explorer 启动、不经 cmd，避免 `&` 之类的 shell 元字符被解释。
 #[tauri::command]
 pub fn open_path(path: String) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", &path])
-        .creation_flags(0x0800_0000)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    let p = path.trim().trim_matches(|c| c == '`' || c == '"' || c == '\'').to_string();
+    if p.is_empty() {
+        return Err("空路径".into());
+    }
+    if p.starts_with("http://") || p.starts_with("https://") {
+        return std::process::Command::new("explorer").arg(&p).creation_flags(0x0800_0000).spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
+    let raw = p.strip_prefix("file:///").or_else(|| p.strip_prefix("file://")).unwrap_or(&p);
+    let s = percent_decode(raw).replace('/', "\\");
+    let target = std::path::Path::new(&s);
+    if !target.exists() {
+        return Err(format!("找不到：{s}"));
+    }
+    let ext = target.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let risky = [
+        "exe", "bat", "cmd", "com", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi", "msc", "lnk", "scr", "hta", "reg", "cpl", "jar", "dll", "url", "pif", "appref-ms",
+    ];
+    if risky.contains(&ext.as_str()) {
+        return std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{s}\""))
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string());
+    }
+    std::process::Command::new("explorer").arg(&s).creation_flags(0x0800_0000).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

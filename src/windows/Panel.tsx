@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import Md from "../lib/Md";
 import {
   Archive, ArrowUp, Check, ClipboardCopy, Eye, File as FileIcon, FileImage, FileSpreadsheet, FileText, Folder, FolderOpen, Languages, Lightbulb, Loader2, Mic,
   Maximize2, MonitorUp, Presentation, Replace, ScanText, ShieldQuestion, Sparkles, TriangleAlert, X,
@@ -319,7 +319,7 @@ function ResultCard({ m, said, onExpand }: { m: AsstMsg; said: string; onExpand:
         right={<button className="btn iconbtn" style={{ background: "transparent", border: "none" }} onClick={onExpand} title="展开成对话窗口，继续追问"><Maximize2 size={14} /></button>}
       />
       <div style={{ padding: "8px 16px 14px" }}>
-        {hasText && <div className="md" style={{ maxHeight: 240, overflowY: "auto", paddingRight: 4, fontSize: 14 }}><ReactMarkdown>{m.text}</ReactMarkdown></div>}
+        {hasText && <div className="md" style={{ maxHeight: 240, overflowY: "auto", paddingRight: 4, fontSize: 14 }}><Md>{m.text}</Md></div>}
         {!hasText && m.files.length === 0 && <div style={{ color: "var(--muted)" }}>已完成。</div>}
         {m.files.length > 0 && (
           <div style={{ marginTop: hasText ? 10 : 0, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -480,7 +480,7 @@ function AsstBubble({ m }: { m: AsstMsg }) {
             {m.stepCount > m.steps.length && <div style={{ fontSize: 11, color: "var(--muted)", paddingLeft: 20 }}>…已完成 {m.stepCount} 步</div>}
           </div>
         )}
-        {m.text ? <div className="md"><ReactMarkdown>{m.text}</ReactMarkdown></div> : m.steps.length === 0 ? <div className="shimmer" style={{ height: 10, width: 140, borderRadius: 6 }} /> : null}
+        {m.text ? <div className="md"><Md>{m.text}</Md></div> : m.steps.length === 0 ? <div className="shimmer" style={{ height: 10, width: 140, borderRadius: 6 }} /> : null}
       </Bubble>
     );
   }
@@ -488,7 +488,7 @@ function AsstBubble({ m }: { m: AsstMsg }) {
   const hasText = m.text.trim().length > 0;
   return (
     <Bubble wide>
-      {hasText ? <div className="md"><ReactMarkdown>{m.text}</ReactMarkdown></div> : m.files.length === 0 ? <span style={{ color: "var(--muted)" }}>已完成。</span> : null}
+      {hasText ? <div className="md"><Md>{m.text}</Md></div> : m.files.length === 0 ? <span style={{ color: "var(--muted)" }}>已完成。</span> : null}
       {m.files.length > 0 && (
         <div style={{ marginTop: hasText ? 10 : 0, display: "flex", flexDirection: "column", gap: 6 }}>
           {m.files.map((f) => <FileCard key={f.path} f={f} />)}

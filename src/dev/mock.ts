@@ -54,6 +54,7 @@ export function mockInvoke(cmd: string, _args: any): any {
       return [
         { ts: 1794370000, instruction: "把这个文件转成 PDF", result: "已转换为 PDF。", backend: "claude", context: "week45_report.docx", files: [SAMPLE_FILE.path], ok: true },
         { ts: 1794366000, instruction: "翻译成中文", result: "快速的棕色狐狸跳过了懒狗。", backend: "claude", context: "已选中 128 字", files: [], ok: true },
+        { ts: 1794368000, instruction: "全盘找一下那个实验记录", result: "找到了，是 **培养基配方**：\n\n- 七叶苷：**1 g**\n\n[查看原始记录](C:/Users/me/Documents/notes/example-record.md)\n\n也可以看 [官网](https://example.com/a?x=1&y=2)。", backend: "codex", context: "未选中内容", files: [], ok: true },
         { ts: 1794360000, instruction: "帮我看一下当前页面", result: "找不到 claude 命令行", backend: "codex", context: "当前屏幕 / 页面", files: [], ok: false },
       ];
     case "autostart_get": return false;

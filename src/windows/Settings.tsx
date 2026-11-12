@@ -3,6 +3,7 @@ import { listenSync } from "../lib/transport";
 import {
   AudioLines, Bot, Brain, CheckCircle2, CircleAlert, Download, History, Info, Keyboard, Loader2, MousePointerClick, Play, ShieldCheck, SlidersHorizontal, Trash2, XCircle,
 } from "lucide-react";
+import Md from "../lib/Md";
 import { api, BACKEND_NAMES, type ApiCfg, type CliCfg, type CliInfo, type Config, type HistoryEntry } from "../lib/api";
 
 type Tab = "general" | "backend" | "voice" | "memory" | "safety" | "history" | "about";
@@ -413,8 +414,8 @@ function HistoryTab() {
           </div>
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, marginLeft: 25 }}>{h.context}{h.files.length > 0 && ` · ${h.files.length} 个结果文件`}</div>
           {open === i && (
-            <div style={{ marginTop: 10, marginLeft: 25, fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", userSelect: "text" }}>
-              {h.result}
+            <div style={{ marginTop: 10, marginLeft: 25, fontSize: 13, lineHeight: 1.6, userSelect: "text" }}>
+              <div className="md"><Md>{h.result}</Md></div>
               {h.files.map((f) => (
                 <div key={f} style={{ marginTop: 6 }}><button className="s-btn" onClick={(e) => { e.stopPropagation(); api.revealPath(f); }}>{f}</button></div>
               ))}
