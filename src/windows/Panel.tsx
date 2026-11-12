@@ -90,6 +90,8 @@ export default function Panel() {
   const [autoClose, setAutoClose] = useState(0);
   const cardRef = useRef<HTMLDivElement>(null); // 根容器：包含气泡 + 胶囊（或单张卡片）
   const hoverRef = useRef(false);
+  const [hover, setHover] = useState(false); // 执行中：鼠标悬停才展开进度
+  const leaveTimer = useRef(0);
   const lastLayout = useRef("");
 
   useEffect(() => {
@@ -175,15 +177,37 @@ export default function Panel() {
   const pillKind: "listening" | "busy" | "working" | null =
     st.view === "listening" ? "listening" : st.view === "transcribing" ? "busy" : st.view === "working" && !chat ? "working" : null;
   const handlers = {
-    onMouseEnter: () => (hoverRef.current = true),
-    onMouseLeave: () => (hoverRef.current = false),
+    onPointerEnter: () => {
+      window.clearTimeout(leaveTimer.current);
+      hoverRef.current = true;
+      setHover(true);
+    },
+    onPointerLeave: () => {
+      hoverRef.current = false;
+      // 稍等一下再收起，免得窗口随内容变大 / 变小时指针边缘抖动造成闪烁
+      leaveTimer.current = window.setTimeout(() => setHover(false), 280);
+    },
     onMouseDown,
   };
   if (st.view === "hidden") return <div ref={cardRef} className="stack" />;
+  // 执行中：平时只留一个小圆圈，不挡你干别的；鼠标悬停才展开"你说的话 + 任务进度 + 取消"
+  if (pillKind === "working" && !hover) {
+    return (
+      <div ref={cardRef} className="stack" {...handlers}>
+        <div data-part className="pwin orb-only" data-drag title="SayDo 正在执行（悬停查看进度）">
+          <div className="mic-orb busy" data-drag><Loader2 size={15} className="spin" /></div>
+        </div>
+      </div>
+    );
+  }
   if (pillKind) {
     return (
       <div ref={cardRef} className="stack" {...handlers}>
-        <CaptionBubble kind={pillKind} caption={st.caption} said={st.said} ctx={st.ctx} asst={asst} />
+        {pillKind === "working" ? (
+          <ProgressBubble said={st.said} asst={asst} />
+        ) : (
+          <CaptionBubble kind={pillKind} caption={st.caption} said={st.said} ctx={st.ctx} asst={asst} />
+        )}
         <Pill kind={pillKind} levels={levels} />
       </div>
     );
@@ -263,7 +287,32 @@ function Pill({ kind, levels }: { kind: "listening" | "busy" | "working"; levels
       ) : (
         <VoiceCurve level={level} idle={kind === "busy"} />
       )}
-      <button className="xbtn sm" onClick={() => api.hide()} title="取消 (Esc)"><X size={13} /></button>
+      <button className="xbtn sm" onPointerDown={(e) => { e.stopPropagation(); void api.hide(); }} title="取消 (Esc)"><X size={13} /></button>
+    </div>
+  );
+}
+
+/** 执行中、鼠标悬停时展开的任务进度：你说的话 + 最近几步（已完成打勾，当前一步转圈）+ 已完成步数 */
+function ProgressBubble({ said, asst }: { said: string; asst?: AsstMsg }) {
+  const steps = asst?.steps ?? [];
+  const lastText = asst?.text ? asst.text.split("\n").filter(Boolean).slice(-1)[0] : "";
+  return (
+    <div data-part className="pwin pbub" data-drag style={{ ["--r" as string]: "16px", width: 300 }}>
+      {said && <div className="pbub-main" title={said}>{said}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: said ? 7 : 0 }}>
+        {steps.length === 0 && !lastText && <div className="pbub-sub">思考中…</div>}
+        {steps.map((s, i) => {
+          const cur = i === steps.length - 1 && !lastText;
+          return (
+            <div key={i + s} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: cur ? "var(--text)" : "var(--muted)" }}>
+              {cur ? <Loader2 size={11} className="spin" style={{ flex: "none" }} /> : <Check size={11} style={{ flex: "none", color: "var(--ok)" }} />}
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s}</span>
+            </div>
+          );
+        })}
+        {asst && asst.stepCount > steps.length && <div className="pbub-sub">…已完成 {asst.stepCount} 步</div>}
+        {lastText && <div className="pbub-sub" style={{ whiteSpace: "normal", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{lastText}</div>}
+      </div>
     </div>
   );
 }
