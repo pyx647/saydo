@@ -169,9 +169,9 @@ pub fn on_down(app: AppHandle) {
             *s.doc.lock().unwrap() = prev.as_ref().and_then(|p| p.doc.lock().unwrap().clone());
             s.doc_ready.store(true, Ordering::SeqCst);
         } else {
-            let (s6, exe) = (s.clone(), s.fg.exe.clone());
+            let (s6, exe, title) = (s.clone(), s.fg.exe.clone(), s.fg.title.clone());
             std::thread::spawn(move || {
-                *s6.doc.lock().unwrap() = capture::office_context(&exe);
+                *s6.doc.lock().unwrap() = capture::office_context(&exe, &title);
                 s6.doc_ready.store(true, Ordering::SeqCst);
             });
         }

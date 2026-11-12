@@ -149,6 +149,25 @@ fn memory_block(cfg: &Config) -> String {
     o
 }
 
+/// 前台软件 → 怎么连上"它正在运行的这个实例"来操作（而不是另开一个 / 离线生成文件）
+fn app_hint(exe: &str) -> Option<&'static str> {
+    Some(match exe.to_lowercase().as_str() {
+        "powerpnt.exe" => "用 COM 连接正在运行的实例：`[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')`；新建演示文稿用它的 `Presentations.Add()`",
+        "winword.exe" => "用 COM 连接正在运行的实例：`GetActiveObject('Word.Application')`；新建文档用 `Documents.Add()`",
+        "excel.exe" => "用 COM 连接正在运行的实例：`GetActiveObject('Excel.Application')`；新建工作簿用 `Workbooks.Add()`",
+        "outlook.exe" => "用 COM 连接正在运行的实例：`GetActiveObject('Outlook.Application')`（发信等对外动作先让用户确认）",
+        "onenote.exe" => "用 COM：`New-Object -ComObject OneNote.Application`（会接管正在运行的 OneNote）",
+        "msaccess.exe" => "用 COM 连接正在运行的实例：`GetActiveObject('Access.Application')`",
+        "origin64.exe" | "origin.exe" => "用 COM 连接正在运行的 Origin：`GetActiveObject('Origin.ApplicationSI')`（连不上再 `New-Object -ComObject Origin.ApplicationSI`）",
+        "hwp.exe" => "用 COM 操作正在运行的 한글：`HWPFrame.HwpObject`（`New-Object -ComObject HWPFrame.HwpObject`，pyhwpx 也是这个接口）",
+        "devenv.exe" => "用 COM 操作正在运行的 Visual Studio：`GetActiveObject('VisualStudio.DTE.18.0')`",
+        "chrome.exe" | "msedge.exe" => "用你的浏览器工具（Claude in Chrome 扩展）操作**已经打开的标签页**，不要另外启动新的浏览器",
+        "obsidian.exe" => "Obsidian 会自动刷新 vault 里被改动的 md 文件，直接读写文件即可（需要时可用它的命令行）",
+        "notepad++.exe" => "直接改文件；Notepad++ 会提示重新载入",
+        _ => return None,
+    })
+}
+
 /// 构造提示词；返回 (prompt, 需要额外授权访问的目录)
 pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: bool) -> (String, Vec<PathBuf>) {
     let mut dirs: Vec<PathBuf> = vec![];
@@ -204,6 +223,9 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
     if let Some(d) = &inp.doc_ctx {
         ctx.push_str(d);
     }
+    if let Some(h) = app_hint(&inp.fg.exe) {
+        ctx.push_str(&format!("- 前台软件的操作方式：{h}\n"));
+    }
 
     if let Some(sd) = &inp.scratch {
         dirs.push(sd.clone());
@@ -238,6 +260,7 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
     }
     p.push_str("4. 你本机配好的所有 MCP（Gmail / Drive / 日历 / Sheets 等）和 Skills 都可以用来完成任务。\n");
     p.push_str("5. 如果你创建、移动、重命名或修改了文件，在回答的最后每个文件单独一行写：`FILE: <绝对路径>`（这些行会被弹窗渲染成\"打开 / 定位\"按钮）。\n");
+    p.push_str("6. **优先在正在运行的软件里完成**：用户要改的东西属于某个正在运行的软件（前台就是它，或者任务明显指它，比如做 / 改 PPT 而 PowerPoint 开着），就连接那个**正在运行的实例**来做，用户当场就能看到。用户明确说「新建 / 再做一个」，或者前台没有相关文档时，也**在这个正在运行的软件里新建**，而不是在后台离线生成一个文件再让用户自己去打开。只有那个软件没在运行、也没有可用接口时，才退而生成文件，并说明原因。\n");
     if let Some(sd) = &inp.scratch {
         p.push_str(&format!(
             "7. **文件放哪里**：这个任务有专用的临时文件夹 `{}`。所有中间产物（草稿、测试图、转换过程里的文件、临时脚本、反复修改的版本）一律放在这个文件夹里，任务结束后 SayDo 会自动清理它；**绝对不要把中间文件放到桌面、下载或文档里**。只有最终成品才放到用户要的位置：有原文件就放原文件同一目录；没有原文件时，放进 `文档\\SayDo输出\\<任务名>\\`（一个任务一个子文件夹），**不要放桌面**。成品只留用户真正要的那几个文件，不要留多个版本。\n",
@@ -245,7 +268,7 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
         ));
     }
     if inp.doc_ctx.is_some() {
-        p.push_str("6. 上面的 Office 文档就是用户说的\"这个 PPT / 这份文档 / 这个表格 / 这一页\"。要修改它，就**直接改这份正在打开的文档**：用 PowerShell 的 COM（`[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')`，Word / Excel 同理）操作已打开的对象，改动会立刻出现在用户眼前。**不要新建另一个文件，不要另存为副本，不要改磁盘上的同名文件**，除非用户明确说了\"另存 / 复制一份 / 新建\"。改完不要自动保存或关闭文档，除非用户要求。COM 连不上就如实告诉用户原因，不要悄悄改做一个新文件。\n");
+        p.push_str("8. 上面标出的那份 Office 文档（同时开着多份时，是用户**当前聚焦的那一份**，已按前台窗口标题挑好）就是用户说的\"这个 PPT / 这份文档 / 这个表格 / 这一页\"。要修改它，就**直接改这份正在打开的文档**：用 PowerShell 的 COM（`[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')`，Word / Excel 同理）操作已打开的对象，改动会立刻出现在用户眼前。**不要新建另一个文件，不要另存为副本，不要改磁盘上的同名文件**，除非用户明确说了\"另存 / 复制一份 / 新建\"。改完不要自动保存或关闭文档，除非用户要求。COM 连不上就如实告诉用户原因，不要悄悄改做一个新文件。\n");
     }
     if !cfg.extra_prompt.trim().is_empty() {
         p.push_str(&format!("\n## 用户的常驻偏好\n{}\n", cfg.extra_prompt.trim()));

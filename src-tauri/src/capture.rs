@@ -299,10 +299,14 @@ const PPT_SCRIPT: &str = r#"
 $ErrorActionPreference='Stop'
 try{ $app=[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application') }catch{ exit 0 }
 if($app.Presentations.Count -lt 1){ exit 0 }
-$p=$app.ActivePresentation
-$o=[ordered]@{path=$p.FullName;saved=[bool]$p.Saved;slides=[int]$p.Slides.Count}
-try{ $o.slide=[int]$app.ActiveWindow.View.Slide.SlideIndex }catch{}
-try{ $sel=$app.ActiveWindow.Selection
+# 同时开着多份：用前台窗口标题里的文件名挑出用户正在用的那份（取名字最长的匹配），对不上再用活动文档
+$title=[string]$env:SAYDO_FG_TITLE; $pres=$null; $best=0
+foreach($x in $app.Presentations){ $base=[IO.Path]::GetFileNameWithoutExtension([string]$x.Name); if($title -and $base.Length -gt $best -and $title.Contains($base)){ $pres=$x; $best=$base.Length } }
+if(-not $pres){ $pres=$app.ActivePresentation }
+$o=[ordered]@{path=$pres.FullName;saved=[bool]$pres.Saved;slides=[int]$pres.Slides.Count}
+$o.others=@($app.Presentations | Where-Object { $_.FullName -ne $pres.FullName } | ForEach-Object { $_.FullName })
+try{ $w=$pres.Windows.Item(1); $o.slide=[int]$w.View.Slide.SlideIndex
+  $sel=$w.Selection
   if($sel.Type -eq 2){ $o.shapes=@($sel.ShapeRange | ForEach-Object { $_.Name }) }
   if($sel.Type -eq 3){ $o.text=[string]$sel.TextRange.Text } }catch{}
 $o | ConvertTo-Json -Compress
@@ -313,10 +317,13 @@ const WORD_SCRIPT: &str = r#"
 $ErrorActionPreference='Stop'
 try{ $app=[Runtime.InteropServices.Marshal]::GetActiveObject('Word.Application') }catch{ exit 0 }
 if($app.Documents.Count -lt 1){ exit 0 }
-$d=$app.ActiveDocument
+$title=[string]$env:SAYDO_FG_TITLE; $d=$null; $best=0
+foreach($x in $app.Documents){ $base=[IO.Path]::GetFileNameWithoutExtension([string]$x.Name); if($title -and $base.Length -gt $best -and $title.Contains($base)){ $d=$x; $best=$base.Length } }
+if(-not $d){ $d=$app.ActiveDocument }
 $o=[ordered]@{path=$d.FullName;saved=[bool]$d.Saved}
+$o.others=@($app.Documents | Where-Object { $_.FullName -ne $d.FullName } | ForEach-Object { $_.FullName })
 try{ $o.pages=[int]$d.ComputeStatistics(2) }catch{}
-try{ $t=[string]$app.Selection.Text; if($t.Trim().Length -gt 0){ $o.text=$t } }catch{}
+try{ $t=[string]$d.ActiveWindow.Selection.Text; if($t.Trim().Length -gt 0){ $o.text=$t } }catch{}
 $o | ConvertTo-Json -Compress
 "#;
 
@@ -325,17 +332,20 @@ const EXCEL_SCRIPT: &str = r#"
 $ErrorActionPreference='Stop'
 try{ $app=[Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application') }catch{ exit 0 }
 if($app.Workbooks.Count -lt 1){ exit 0 }
-$b=$app.ActiveWorkbook
+$title=[string]$env:SAYDO_FG_TITLE; $b=$null; $best=0
+foreach($x in $app.Workbooks){ $base=[IO.Path]::GetFileNameWithoutExtension([string]$x.Name); if($title -and $base.Length -gt $best -and $title.Contains($base)){ $b=$x; $best=$base.Length } }
+if(-not $b){ $b=$app.ActiveWorkbook }
 $o=[ordered]@{path=$b.FullName;saved=[bool]$b.Saved}
-try{ $o.sheet=[string]$app.ActiveSheet.Name }catch{}
-try{ $o.range=[string]$app.Selection.Address($false,$false) }catch{}
+$o.others=@($app.Workbooks | Where-Object { $_.FullName -ne $b.FullName } | ForEach-Object { $_.FullName })
+try{ $o.sheet=[string]$b.ActiveSheet.Name }catch{}
+try{ if($b.FullName -eq $app.ActiveWorkbook.FullName){ $o.range=[string]$app.Selection.Address($false,$false) } }catch{}
 $o | ConvertTo-Json -Compress
 "#;
 
 /// 前台是 PowerPoint / Word / Excel 时，问一下它"现在打开的是哪份文档、当前页 / 选区是什么"，
 /// 让 Agent 知道"这个 PPT / 这份文档"指的是哪一份，直接改它而不是另做一个新文件。
 /// 返回一行可直接放进提示词的描述；没有可用文档 / 超时返回 None。（在按下热键时并行取，不增加等待）
-pub fn office_context(exe: &str) -> Option<String> {
+pub fn office_context(exe: &str, fg_title: &str) -> Option<String> {
     use base64::Engine;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -349,6 +359,7 @@ pub fn office_context(exe: &str) -> Option<String> {
     let enc = base64::engine::general_purpose::STANDARD.encode(bytes);
     let child = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &enc])
+        .env("SAYDO_FG_TITLE", fg_title)
         .creation_flags(0x0800_0000)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -400,6 +411,10 @@ pub fn office_context(exe: &str) -> Option<String> {
     }
     if v["saved"] == false {
         parts.push("有未保存的修改".into());
+    }
+    let others: Vec<String> = v["others"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    if !others.is_empty() {
+        parts.push(format!("同时还开着另外 {} 份：{}。这些不是用户正在用的，除非用户点名，不要动", others.len(), others.iter().map(|o| format!("`{o}`")).collect::<Vec<_>>().join("、")));
     }
     let shown = if path.is_empty() { "（还没保存过的新文档）".to_string() } else { format!("`{path}`") };
     Some(format!("- 前台是 {prog}，用户正在编辑的文档：{shown}（{}）\n", parts.join("；")))
