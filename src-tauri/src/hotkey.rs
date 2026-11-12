@@ -128,21 +128,22 @@ fn fire_up() {
     }
 }
 
-/// 热键的物理按键现在是否都还按着（GetAsyncKeyState）
+/// 热键里的**修饰键**（Ctrl/Alt/Shift/Win）现在是否都还按着（GetAsyncKeyState）。
+/// 注意：主键（如 Space）和鼠标侧键被我们的钩子吞掉了（return 1），系统根本不会记录它们的按下状态，
+/// GetAsyncKeyState 永远返回"没按"——所以只能查没被吞的修饰键；没有修饰键的热键不做兜底（靠 60 秒录音上限）。
 fn physically_down() -> bool {
     use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
     let d = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16) & 0x8000 != 0 };
     match spec_cell().lock().ok().and_then(|g| g.clone()) {
-        Some(Spec::Keyboard { ctrl, alt, shift, win, vk }) => {
-            d(vk as i32) && (!ctrl || d(0x11)) && (!alt || d(0x12)) && (!shift || d(0x10)) && (!win || d(0x5B) || d(0x5C))
+        Some(Spec::Keyboard { ctrl, alt, shift, win, .. }) => {
+            (!ctrl || d(0x11)) && (!alt || d(0x12)) && (!shift || d(0x10)) && (!win || d(0x5B) || d(0x5C))
         }
-        Some(Spec::Mouse(b)) => d(if b == 1 { 0x05 } else { 0x06 }),
-        None => true,
+        _ => true,
     }
 }
 
 /// 兜底：低级钩子偶尔会漏掉"松开"事件（钩子超时、锁屏/UAC 期间松键等），录音就会一直不停。
-/// 按住期间每 100ms 看一次物理按键，连续 500ms 都没按着就当作已松开。
+/// 按住期间每 100ms 看一次修饰键，连续 500ms 都没按着就当作已松开。
 /// （抓选区时我们会临时模拟松开 Alt 等，不到 500ms，不会误判。）
 fn spawn_watchdog() {
     std::thread::spawn(|| {
