@@ -5,6 +5,7 @@ mod capture;
 mod config;
 mod history;
 mod hotkey;
+mod log;
 mod mcp;
 mod router;
 mod session;

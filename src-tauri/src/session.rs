@@ -96,8 +96,13 @@ pub fn describe_context() -> String {
 /// SenseVoice 不是流式模型，但识别几秒音频只要零点几秒，整段重识别足够快。云端引擎不支持，松开后才出字。
 fn caption_loop(app: AppHandle, s: Arc<Session>) {
     let mut last_n = 0usize;
+    let started = Instant::now();
     loop {
         std::thread::sleep(Duration::from_millis(600));
+        // 录得太久（多半是漏了松开事件）就不再刷字幕：整段重识别的开销随时长增长，会把 CPU 吃满
+        if started.elapsed() > Duration::from_secs(90) {
+            return;
+        }
         let cfg = config::get();
         if cfg.stt_engine != "local" || !stt::model_ready(&app) {
             return;
@@ -110,6 +115,10 @@ fn caption_loop(app: AppHandle, s: Arc<Session>) {
             continue;
         }
         last_n = pcm.len();
+        // 字幕只重识别最后 20 秒，开销有上限
+        if pcm.len() > 16000 * 20 {
+            pcm = pcm[pcm.len() - 16000 * 20..].to_vec();
+        }
         audio::normalize(&mut pcm);
         if let Ok(t) = stt::transcribe(&app, &pcm, stt::lang_id(&cfg.lang)) {
             let t = t.trim();
@@ -150,6 +159,7 @@ pub fn on_down(app: AppHandle) {
         });
         *cur().lock().unwrap() = Some(s.clone());
         tools::reset_allow();
+        crate::log::log(&format!("session {seq}: down, fg={} follow_up={}", s.fg.exe, from_self));
 
         match audio::start(app.clone()) {
             Ok(r) => *s.rec.lock().unwrap() = Some(r),
@@ -183,6 +193,15 @@ pub fn on_down(app: AppHandle) {
             }
         }
         {
+            // 最长录 60 秒：到点自动当作松开，避免漏掉松开事件时一直录下去
+            let (app5, s5) = (app.clone(), s.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(60));
+                if PRESS_SEQ.load(Ordering::SeqCst) == s5.id && s5.rec.lock().unwrap().is_some() {
+                    crate::log::log(&format!("session {}: 60s limit reached, auto-release", s5.id));
+                    on_up(app5);
+                }
+            });
             let (app2, s2) = (app.clone(), s.clone());
             std::thread::spawn(move || caption_loop(app2, s2));
             let app3 = app.clone();
@@ -227,8 +246,12 @@ pub fn on_up(app: AppHandle) {
         }
         let s = get().unwrap();
         wait_for(|| s.ready.load(Ordering::SeqCst), 2500);
-        let Some(rec) = s.rec.lock().unwrap().take() else { return };
+        let Some(rec) = s.rec.lock().unwrap().take() else {
+            crate::log::log(&format!("session {}: up but no recorder (already stopped)", s.id));
+            return;
+        };
         let mut pcm = rec.stop();
+        crate::log::log(&format!("session {}: recorder stopped, {:.1}s of audio", s.id, pcm.len() as f32 / 16000.0));
         let cfg = config::get();
 
         // 短按（<0.3s）：不是说话，是想打字
@@ -250,6 +273,10 @@ pub fn on_up(app: AppHandle) {
         } else {
             stt::transcribe(&app, &pcm, stt::lang_id(&cfg.lang))
         };
+        match &r {
+            Ok(t) => crate::log::log(&format!("session {}: transcribed {} chars", s.id, t.chars().count())),
+            Err(e) => crate::log::log(&format!("session {}: transcribe error: {e}", s.id)),
+        }
         match r {
             Ok(t) if !t.trim().is_empty() => {
                 ui::emit(&app, json!({ "phase": "caption", "text": t.trim(), "final": true }));

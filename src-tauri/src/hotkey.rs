@@ -115,14 +115,58 @@ fn fire_down() {
         HELD.store(false, Ordering::SeqCst);
         return;
     }
+    crate::log::log("hotkey: down");
     if let Some(app) = APP.get() {
         crate::session::on_down(app.clone());
     }
+    spawn_watchdog();
 }
 fn fire_up() {
+    crate::log::log("hotkey: up");
     if let Some(app) = APP.get() {
         crate::session::on_up(app.clone());
     }
+}
+
+/// 热键的物理按键现在是否都还按着（GetAsyncKeyState）
+fn physically_down() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    let d = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16) & 0x8000 != 0 };
+    match spec_cell().lock().ok().and_then(|g| g.clone()) {
+        Some(Spec::Keyboard { ctrl, alt, shift, win, vk }) => {
+            d(vk as i32) && (!ctrl || d(0x11)) && (!alt || d(0x12)) && (!shift || d(0x10)) && (!win || d(0x5B) || d(0x5C))
+        }
+        Some(Spec::Mouse(b)) => d(if b == 1 { 0x05 } else { 0x06 }),
+        None => true,
+    }
+}
+
+/// 兜底：低级钩子偶尔会漏掉"松开"事件（钩子超时、锁屏/UAC 期间松键等），录音就会一直不停。
+/// 按住期间每 100ms 看一次物理按键，连续 500ms 都没按着就当作已松开。
+/// （抓选区时我们会临时模拟松开 Alt 等，不到 500ms，不会误判。）
+fn spawn_watchdog() {
+    std::thread::spawn(|| {
+        let mut up_since: Option<std::time::Instant> = None;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if !HELD.load(Ordering::SeqCst) {
+                return;
+            }
+            if physically_down() {
+                up_since = None;
+            } else {
+                let t = *up_since.get_or_insert_with(std::time::Instant::now);
+                if t.elapsed() > std::time::Duration::from_millis(500) {
+                    if HELD.swap(false, Ordering::SeqCst) {
+                        crate::log::log("hotkey: watchdog — missed key-up, releasing");
+                        MAIN_DOWN.store(false, Ordering::Relaxed);
+                        fire_up();
+                    }
+                    return;
+                }
+            }
+        }
+    });
 }
 
 unsafe extern "system" fn kb_proc(
