@@ -63,6 +63,7 @@ extern "C" {
     fn CGEventGetIntegerValueField(event: CFTypeRef, field: u32) -> i64;
     fn CGEventPost(tap: u32, event: CFTypeRef);
     fn CGEventSourceFlagsState(state: i32) -> u64;
+    fn CGEventSourceKeyState(state: i32, keycode: u16) -> bool;
     fn CGEventTapCreate(tap: u32, place: u32, options: u32, mask: u64, cb: TapCallback, info: *mut c_void) -> CFTypeRef;
     fn CGEventTapEnable(tap: CFTypeRef, enable: bool);
     fn CGPreflightScreenCaptureAccess() -> bool;
@@ -185,6 +186,11 @@ pub fn modifier_flags() -> u64 {
     unsafe { CGEventSourceFlagsState(1) }
 }
 
+/// 某个键此刻是否物理按着（HID 层：即使这个键被我们的监听吞掉了也查得到）
+pub fn key_down(keycode: u16) -> bool {
+    unsafe { CGEventSourceKeyState(1, keycode) }
+}
+
 // ───────────────────────── 模拟按键 ─────────────────────────
 
 /// 我们自己注入的事件带这个标记，热键监听据此忽略
@@ -199,7 +205,10 @@ const KEY_V: u16 = 9;
 /// 发一次 ⌘+键。显式把修饰键设成"只有 Command"，所以用户此刻还按着 Option / Control 也不影响。
 fn send_cmd_key(keycode: u16) {
     unsafe {
-        let src = CGEventSourceCreate(1);
+        // 私有事件源（kCGEventSourceStatePrivate = -1）：注入的事件不会改写系统记录的"当前按着哪些修饰键"。
+        // 用 HID 状态源的话，这一发"只带 Command"的按键会把用户正按着的 Option / Control 记成已松开，
+        // 之后的按键事件和修饰键查询都跟着错 → 热键被误判为松开，录音不到一秒就停。
+        let src = CGEventSourceCreate(-1);
         for down in [true, false] {
             let e = CGEventCreateKeyboardEvent(src, keycode, down);
             if e.is_null() {

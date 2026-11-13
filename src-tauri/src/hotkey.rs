@@ -146,6 +146,12 @@ fn physically_down() -> bool {
     let (c, a, s, w) = {
         use crate::mac::{modifier_flags, FLAG_ALT, FLAG_CMD, FLAG_CTRL, FLAG_SHIFT};
         let f = modifier_flags();
+        // macOS 在硬件层能查到主键本身（Windows 查不到被吞掉的键）：主键还按着就一定没松手，直接算"按着"
+        if let Some(Spec::Keyboard { vk, .. }) = spec_cell().lock().ok().and_then(|g| g.clone()) {
+            if (0u16..128).any(|k| mac_vk(k) == Some(vk) && crate::mac::key_down(k)) {
+                return true;
+            }
+        }
         (f & FLAG_CTRL != 0, f & FLAG_ALT != 0, f & FLAG_SHIFT != 0, f & FLAG_CMD != 0)
     };
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -350,7 +356,11 @@ fn on_tap(ev: crate::mac::TapEvent) -> bool {
     };
     match ev {
         TapEvent::Key { keycode, down, flags } => {
-            set_mods(flags);
+            // 热键按住期间，普通按键事件（主键的自动连发、别的键）自带的修饰键标志不可信——
+            // 刚注入过 ⌘C 时它可能短暂缺掉 Option / Control。这期间只认 flagsChanged 事件（真的按下 / 松开了修饰键）。
+            if !HELD.load(Ordering::SeqCst) {
+                set_mods(flags);
+            }
             match mac_vk(keycode) {
                 Some(vk) => key_logic(vk, down),
                 None => false,
