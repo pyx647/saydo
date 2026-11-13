@@ -46,8 +46,47 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked --lib
 
+      # 固定签名：用仓库密钥里的自签名证书签名，每个版本的签名身份就都一样，
+      # macOS 不会在换版本后把辅助功能 / 屏幕录制 / 麦克风的授权作废。
+      # 没配密钥（比如 fork）时退回 ad-hoc 签名，构建照常通过。
+      - name: Import signing certificate
+        id: cert
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then
+            echo "No signing certificate configured; building ad-hoc signed."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "config={}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/saydo-signing.keychain-db"
+          KP="$(uuidgen)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KP" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo 'config={"bundle":{"macOS":{"signingIdentity":"SayDo Self-Signed"}}}' >> "$GITHUB_OUTPUT"
+
       - name: Build app + dmg
-        run: pnpm tauri build --target ${{ matrix.target }}
+        run: pnpm tauri build --target ${{ matrix.target }} --config '${{ steps.cert.outputs.config }}'
+
+      # 配了证书却没签上（比如退回了 ad-hoc）就让构建失败，免得悄悄发出一个会丢权限的包
+      - name: Check signature
+        run: |
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/SayDo.app"
+          codesign --verify --deep --strict "$APP"
+          REQ="$(codesign -d -r - "$APP" 2>&1)"
+          echo "$REQ"
+          if [ "${{ steps.cert.outputs.signed }}" = "true" ]; then
+            echo "$REQ" | grep -q "certificate leaf"
+          fi
 
       - name: Upload dmg
         uses: actions/upload-artifact@v4
