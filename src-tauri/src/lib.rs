@@ -6,7 +6,10 @@ mod config;
 mod history;
 mod hotkey;
 mod log;
+#[cfg(target_os = "macos")]
+mod mac;
 mod mcp;
+mod proc;
 mod router;
 mod session;
 mod stt;
@@ -86,8 +89,7 @@ async fn detect_clis() -> Vec<CliInfo> {
             let r = tokio::time::timeout(
                 std::time::Duration::from_secs(6),
                 tokio::task::spawn_blocking(move || {
-                    use std::os::windows::process::CommandExt;
-                    std::process::Command::new(p2).arg("--version").creation_flags(0x0800_0000).output()
+                    proc::hide(&mut std::process::Command::new(p2)).arg("--version").output()
                 }),
             )
             .await;
@@ -194,6 +196,10 @@ pub fn run() {
         return;
     }
 
+    // macOS：从访达 / 程序坞启动时 PATH 里没有 homebrew、~/.local/bin 等，先补全，否则找不到 claude / codex / node
+    #[cfg(target_os = "macos")]
+    proc::fix_path_env();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_settings(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
@@ -227,6 +233,16 @@ pub fn run() {
             ui::reveal_path,
         ])
         .setup(|app| {
+            // macOS：菜单栏常驻的辅助程序——不进程序坞、不抢前台；面板在所有桌面（含全屏应用）上都能出现
+            #[cfg(target_os = "macos")]
+            {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                if let Some(w) = app.get_webview_window("panel") {
+                    let _ = w.set_visible_on_all_workspaces(true);
+                }
+                // 截屏要「屏幕录制」权限：启动时请求一次（「辅助功能」在 hotkey::install 里请求，麦克风在第一次录音时系统自己问）
+                std::thread::spawn(mac::request_screen_capture);
+            }
             let handle = app.handle().clone();
             let first_run = !config::config_dir(&handle).join("config.json").exists();
             config::load(&handle);

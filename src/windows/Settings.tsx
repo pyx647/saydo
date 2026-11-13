@@ -93,10 +93,15 @@ function Seg<T extends string>({ value, options, onChange }: { value: T; options
 
 // ───────────────────────── 常规 ─────────────────────────
 
+/** 当前是不是 macOS（修饰键名称、路径写法不一样） */
+const IS_MAC = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+const MAC_KEYS: Record<string, string> = { Ctrl: "⌃ Control", Alt: "⌥ Option", Shift: "⇧ Shift", Cmd: "⌘ Command", Win: "⌘ Command" };
+
 function hotkeyParts(spec: string): string[] {
   if (spec === "Mouse:XButton1") return ["鼠标侧键 1（后退键）"];
   if (spec === "Mouse:XButton2") return ["鼠标侧键 2（前进键）"];
-  return spec.split("+");
+  const parts = spec.split("+");
+  return IS_MAC ? parts.map((p) => MAC_KEYS[p] ?? p) : parts;
 }
 
 function General({ cfg, patch }: { cfg: Config; patch: (p: Partial<Config>) => void }) {
@@ -129,7 +134,7 @@ function General({ cfg, patch }: { cfg: Config; patch: (p: Partial<Config>) => v
         {err && <div style={{ color: "var(--danger)", fontSize: 12.5 }}>{err}</div>}
       </Card>
       <Card title="行为">
-        <Row label="开机自动启动" hint="常驻托盘，随时可用">
+        <Row label="开机自动启动" hint={IS_MAC ? "常驻菜单栏，随时可用" : "常驻托盘，随时可用"}>
           <Toggle on={auto} onChange={async (v) => { try { await api.autostartSet(v); setAuto(v); } catch { /* ignore */ } }} />
         </Row>
         <Row label="轻点热键时打开输入框" hint="没法说话（开会、深夜）时，用打字代替语音">
@@ -208,7 +213,7 @@ function ApiBlock({ c, onChange }: { c: ApiCfg; onChange: (c: ApiCfg) => void })
       <Field label="Base URL"><input className="s-input" value={c.baseUrl} onChange={(e) => onChange({ ...c, baseUrl: e.target.value })} /></Field>
       <Field label="模型"><input className="s-input" value={c.model} onChange={(e) => onChange({ ...c, model: e.target.value })} /></Field>
       <div style={{ gridColumn: "1 / -1" }}>
-        <Field label="API Key（只保存在本机 %APPDATA%\\com.user.saydo\\config.json）"><input className="s-input" type="password" value={c.apiKey} onChange={(e) => onChange({ ...c, apiKey: e.target.value })} placeholder="sk-..." /></Field>
+        <Field label={`API Key（只保存在本机 ${IS_MAC ? "~/Library/Application Support/com.user.saydo/config.json" : "%APPDATA%\\com.user.saydo\\config.json"}）`}><input className="s-input" type="password" value={c.apiKey} onChange={(e) => onChange({ ...c, apiKey: e.target.value })} placeholder="sk-..." /></Field>
       </div>
     </div>
   );
@@ -366,7 +371,7 @@ function Memory({ cfg, patch }: { cfg: Config; patch: (p: Partial<Config>) => vo
       <Card title="关于我" desc="告诉 SayDo 你是谁、在哪、做什么，写一次就行，之后每条指令它都知道，不用再解释。">
         <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>
           每次修改前都会自动备份旧内容（保留最近 30 份）。
-          {dir && <> <button className="s-btn" onClick={() => api.openPath(dir + "\\backups").catch(() => {})}>打开备份文件夹</button></>}
+          {dir && <> <button className="s-btn" onClick={() => api.openPath(dir + (IS_MAC ? "/backups" : "\\backups")).catch(() => {})}>打开备份文件夹</button></>}
         </div>
         <textarea
           className="s-input" rows={6} value={cfg.profile} onChange={(e) => patch({ profile: e.target.value })}

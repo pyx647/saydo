@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
@@ -29,10 +29,10 @@ image = "0.25"
 xcap = "0.9"
 tiny_http = "0.12"
 ureq = { version = "2", default-features = false, features = ["json", "tls"] }
-clipboard-win = "5"
 rfd = "0.15"
 
 [target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",

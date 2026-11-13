@@ -70,10 +70,7 @@ fn ensure(app: &AppHandle, cfg: &Config) -> Result<bool, String> {
     PRIMED.store(false, Ordering::SeqCst);
     let args = claude_args(app, cfg, &[], false)?;
     let mut cmd = Command::new(&exe);
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
+    crate::proc::hide(&mut cmd);
     let mut child = cmd
         .args(&args)
         .current_dir(workspace_dir(app))

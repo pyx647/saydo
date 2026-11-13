@@ -19,7 +19,7 @@ const MOVE_WORDS: &[&str] = &[
     "移动到", "移到", "挪到", "搬到", "放到", "放进", "存到", "保存到", "复制到", "拷贝到", "拷到", "另存到", "归档到", "移动", "挪动", "move to", "move it", "move this", "copy to", "copy it", "copy this",
     "save to", "save it", "put it", "이동", "옮겨", "복사",
 ];
-const KNOWN_PLACES: &[&str] = &["桌面", "下载", "文档", "图片", "视频", "音乐", "desktop", "downloads", "documents", "pictures", "videos", "바탕화면", "다운로드", "문서"];
+const KNOWN_PLACES: &[&str] = &["桌面", "下载", "文档", "图片", "视频", "音乐", "desktop", "downloads", "documents", "pictures", "videos", "movies", "影片", "바탕화면", "다운로드", "문서"];
 
 pub fn needs_folder(cmd: &str, sel: &Selection) -> bool {
     if !matches!(sel, Selection::Files(_)) {
@@ -30,7 +30,7 @@ pub fn needs_folder(cmd: &str, sel: &Selection) -> bool {
         return false;
     }
     // 已经说清楚目标（盘符路径 / 常见位置）就不用再问
-    let has_path = c.contains(":\\") || c.contains(":/") || c.contains("\\\\");
+    let has_path = c.contains(":\\") || c.contains(":/") || c.contains("\\\\") || c.contains("~/") || c.contains("/users/") || c.contains("/volumes/");
     let has_place = KNOWN_PLACES.iter().any(|p| c.contains(p));
     !(has_path || has_place)
 }

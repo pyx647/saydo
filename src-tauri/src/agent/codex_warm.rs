@@ -121,10 +121,7 @@ fn ensure(app: &AppHandle, cfg: &Config) -> Result<bool, String> {
         args.extend(["-c".into(), "mcp_servers.saydo.tool_timeout_sec=600".into()]);
         args.extend(cfg.codex.extra_args.split_whitespace().map(|x| x.to_string()));
         let mut cmd = Command::new(&exe);
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000);
-        }
+        crate::proc::hide(&mut cmd);
         let mut child = cmd
             .args(&args)
             .current_dir(workspace_dir(app))

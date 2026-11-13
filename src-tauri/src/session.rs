@@ -52,8 +52,7 @@ pub fn cancel_current(_app: &AppHandle) {
     ui::cancel_asks();
     let pid = RUN_PID.swap(0, Ordering::SeqCst);
     if pid != 0 {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).creation_flags(0x0800_0000).output();
+        crate::proc::kill_tree(pid);
     }
     if let Some(s) = cur().lock().unwrap().as_ref() {
         s.rec.lock().unwrap().take(); // 丢弃录音器 → 线程结束
@@ -169,9 +168,9 @@ pub fn on_down(app: AppHandle) {
             *s.doc.lock().unwrap() = prev.as_ref().and_then(|p| p.doc.lock().unwrap().clone());
             s.doc_ready.store(true, Ordering::SeqCst);
         } else {
-            let (s6, exe, title) = (s.clone(), s.fg.exe.clone(), s.fg.title.clone());
+            let s6 = s.clone();
             std::thread::spawn(move || {
-                *s6.doc.lock().unwrap() = capture::office_context(&exe, &title);
+                *s6.doc.lock().unwrap() = capture::office_context(&s6.fg);
                 s6.doc_ready.store(true, Ordering::SeqCst);
             });
         }

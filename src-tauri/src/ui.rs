@@ -12,7 +12,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize};
+use tauri::{AppHandle, Emitter, Manager};
+#[cfg(not(target_os = "macos"))]
+use tauri::{PhysicalPosition, PhysicalSize};
 
 // ───────────────────────── 视图模型 ─────────────────────────
 
@@ -89,6 +91,7 @@ pub fn emit_error(app: &AppHandle, msg: &str) {
 
 // ───────────────────────── 窗口 ─────────────────────────
 
+#[cfg(windows)]
 fn set_noactivate(w: &tauri::WebviewWindow, on: bool) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW};
@@ -103,6 +106,13 @@ fn set_noactivate(w: &tauri::WebviewWindow, on: bool) {
             }
         }
     }
+}
+
+/// macOS：没有 WS_EX_NOACTIVATE。面板窗口设成"不能成为 key window"，再加上 App 是不进 Dock 的辅助程序（Accessory），
+/// 显示面板就不会把键盘焦点从原程序手里抢走；需要交互时再放开。
+#[cfg(not(windows))]
+fn set_noactivate(w: &tauri::WebviewWindow, on: bool) {
+    let _ = w.set_focusable(!on);
 }
 
 /// 切换面板是否可交互（false = 不抢焦点的纯展示）
@@ -139,13 +149,22 @@ fn monitor_at(w: &tauri::WebviewWindow, pt: (i32, i32)) -> Option<tauri::Monitor
     mons.iter()
         .find(|m| {
             let (p, s) = (m.position(), m.size());
-            pt.0 >= p.x && pt.0 < p.x + s.width as i32 && pt.1 >= p.y && pt.1 < p.y + s.height as i32
+            // macOS 的光标坐标是"点"（逻辑像素），显示器的位置 / 尺寸是物理像素 → 先除以缩放比再比较
+            #[cfg(target_os = "macos")]
+            let (px, py, sw, sh) = {
+                let k = m.scale_factor();
+                ((p.x as f64 / k) as i32, (p.y as f64 / k) as i32, (s.width as f64 / k) as i32, (s.height as f64 / k) as i32)
+            };
+            #[cfg(not(target_os = "macos"))]
+            let (px, py, sw, sh) = (p.x, p.y, s.width as i32, s.height as i32);
+            pt.0 >= px && pt.0 < px + sw && pt.1 >= py && pt.1 < py + sh
         })
         .cloned()
         .or_else(|| w.primary_monitor().ok().flatten())
 }
 
 /// 底部正中：水平居中，底边距工作区底部 28 逻辑像素；高度变化时向上生长
+#[cfg(not(target_os = "macos"))]
 fn dock(w: &tauri::WebviewWindow) {
     let (lw, lh) = *LAYOUT.lock().unwrap();
     let pt = *MON_PT.lock().unwrap();
@@ -158,6 +177,23 @@ fn dock(w: &tauri::WebviewWindow) {
     let y = b - (28.0 * scale).round() as i32 - ph;
     let _ = w.set_size(PhysicalSize::new(pw.max(1) as u32, ph.max(1) as u32));
     let _ = w.set_position(PhysicalPosition::new(x, y));
+}
+
+/// macOS：窗口坐标本来就是逻辑像素（点），全程用逻辑单位算，多块不同缩放比的屏幕也不会错位。
+/// 工作区已经扣掉了菜单栏和程序坞，所以面板会停在程序坞上方。
+#[cfg(target_os = "macos")]
+fn dock(w: &tauri::WebviewWindow) {
+    let (lw, lh) = *LAYOUT.lock().unwrap();
+    let pt = *MON_PT.lock().unwrap();
+    let Some(m) = monitor_at(w, pt) else { return };
+    let k = m.scale_factor();
+    let wa = m.work_area();
+    let (l, t) = (wa.position.x as f64 / k, wa.position.y as f64 / k);
+    let (ww, wh) = (wa.size.width as f64 / k, wa.size.height as f64 / k);
+    let x = l + (ww - lw) / 2.0;
+    let y = t + wh - 28.0 - lh;
+    let _ = w.set_size(tauri::LogicalSize::new(lw.max(1.0), lh.max(1.0)));
+    let _ = w.set_position(tauri::LogicalPosition::new(x, y));
 }
 
 /// 按热键时显示面板：停靠在光标所在屏幕的底部正中，不抢焦点
@@ -195,8 +231,7 @@ pub fn panel_layout(app: AppHandle, w: f64, h: f64) {
     if DOCKED.load(Ordering::Relaxed) {
         dock(&win);
     } else {
-        let s = win.scale_factor().unwrap_or(1.0);
-        let _ = win.set_size(PhysicalSize::new((w.min(900.0) * s).round() as u32, (h.min(900.0) * s).round() as u32));
+        let _ = win.set_size(tauri::LogicalSize::new(w.min(900.0), h.min(900.0)));
     }
 }
 
@@ -307,9 +342,10 @@ pub fn folder_suggestions() -> Vec<FolderItem> {
         let name = std::path::Path::new(&f).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| f.clone());
         add(f, &name, "recent", &mut out);
     }
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        for (sub, name) in [("Desktop", "桌面"), ("Documents", "文档"), ("Downloads", "下载"), ("Pictures", "图片"), ("Videos", "视频"), ("Music", "音乐")] {
-            add(format!("{home}\\{sub}"), name, "known", &mut out);
+    if let Ok(home) = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
+        // macOS 的"视频"文件夹叫 Movies；不存在的目录 add 里会自动跳过
+        for (sub, name) in [("Desktop", "桌面"), ("Documents", "文档"), ("Downloads", "下载"), ("Pictures", "图片"), ("Videos", "视频"), ("Movies", "影片"), ("Music", "音乐")] {
+            add(std::path::Path::new(&home).join(sub).to_string_lossy().to_string(), name, "known", &mut out);
         }
     }
     out
@@ -367,21 +403,19 @@ fn percent_decode(s: &str) -> String {
 
 /// 点击回答里的链接 / 文件：
 ///  - http(s) → 系统默认浏览器
-///  - 本地路径（C:/x、C:\x、file:///x，可能带 URL 编码）→ 默认程序打开
-///  - 可执行 / 脚本类文件**不运行**，只在资源管理器里定位（链接内容来自模型输出，不能当可信指令）
-/// 一律经 explorer 启动、不经 cmd，避免 `&` 之类的 shell 元字符被解释。
+///  - 本地路径（C:/x、C:\x、/Users/x、file:///x，可能带 URL 编码）→ 默认程序打开
+///  - 可执行 / 脚本类文件**不运行**，只在资源管理器 / 访达里定位（链接内容来自模型输出，不能当可信指令）
+/// Windows 一律经 explorer 启动、不经 cmd；macOS 经 /usr/bin/open，参数不过 shell，`&` 之类的元字符不会被解释。
 #[tauri::command]
 pub fn open_path(path: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
     let p = path.trim().trim_matches(|c| c == '`' || c == '"' || c == '\'').to_string();
     if p.is_empty() {
         return Err("空路径".into());
     }
     if p.starts_with("http://") || p.starts_with("https://") {
-        return std::process::Command::new("explorer").arg(&p).creation_flags(0x0800_0000).spawn().map(|_| ()).map_err(|e| e.to_string());
+        return sys_open(&[&p]);
     }
-    let raw = p.strip_prefix("file:///").or_else(|| p.strip_prefix("file://")).unwrap_or(&p);
-    let s = percent_decode(raw).replace('/', "\\");
+    let s = local_path(&p);
     let target = std::path::Path::new(&s);
     if !target.exists() {
         return Err(format!("找不到：{s}"));
@@ -389,27 +423,80 @@ pub fn open_path(path: String) -> Result<(), String> {
     let ext = target.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     let risky = [
         "exe", "bat", "cmd", "com", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi", "msc", "lnk", "scr", "hta", "reg", "cpl", "jar", "dll", "url", "pif", "appref-ms",
+        // macOS：应用、安装包、脚本、自动化流程
+        "app", "command", "sh", "zsh", "bash", "tool", "scpt", "scptd", "applescript", "workflow", "action", "pkg", "mpkg", "dmg", "terminal", "inetloc", "webloc", "fileloc", "py", "rb", "pl",
     ];
-    if risky.contains(&ext.as_str()) {
-        return std::process::Command::new("explorer")
-            .raw_arg(format!("/select,\"{s}\""))
-            .creation_flags(0x0800_0000)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string());
+    // 没有扩展名但带可执行权限的文件（Unix 可执行文件），双击会在终端里运行 → 也只定位
+    #[cfg(unix)]
+    let risky_mode = {
+        use std::os::unix::fs::PermissionsExt;
+        ext.is_empty() && target.is_file() && target.metadata().map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    };
+    #[cfg(not(unix))]
+    let risky_mode = false;
+    if risky.contains(&ext.as_str()) || risky_mode {
+        return reveal(&s);
     }
-    std::process::Command::new("explorer").arg(&s).creation_flags(0x0800_0000).spawn().map(|_| ()).map_err(|e| e.to_string())
+    sys_open(&[&s])
+}
+
+/// file:// 前缀、URL 编码、斜杠方向 → 本机路径
+fn local_path(p: &str) -> String {
+    #[cfg(windows)]
+    {
+        let raw = p.strip_prefix("file:///").or_else(|| p.strip_prefix("file://")).unwrap_or(p);
+        percent_decode(raw).replace('/', "\\")
+    }
+    #[cfg(not(windows))]
+    {
+        let had_scheme = p.starts_with("file://");
+        let raw = p.strip_prefix("file://localhost").or_else(|| p.strip_prefix("file://")).unwrap_or(p);
+        let mut s = if had_scheme || raw.contains('%') && !std::path::Path::new(raw).exists() { percent_decode(raw) } else { raw.to_string() };
+        if let Some(rest) = s.strip_prefix("~/") {
+            if let Ok(home) = std::env::var("HOME") {
+                s = format!("{home}/{rest}");
+            }
+        }
+        s
+    }
+}
+
+/// 用系统默认方式打开（网址 / 文件 / 文件夹）
+fn sys_open(args: &[&str]) -> Result<(), String> {
+    #[cfg(windows)]
+    let mut cmd = std::process::Command::new("explorer");
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("/usr/bin/open");
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    crate::proc::hide(&mut cmd).args(args).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// 在资源管理器 / 访达里定位（文件夹则直接打开）
+fn reveal(p: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let arg = if std::path::Path::new(p).is_dir() { format!("\"{p}\"") } else { format!("/select,\"{p}\"") };
+        crate::proc::hide(&mut std::process::Command::new("explorer")).raw_arg(arg).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if std::path::Path::new(p).is_dir() { sys_open(&[p]) } else { sys_open(&["-R", p]) }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let path = std::path::Path::new(p);
+        let dir = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
+        sys_open(&[&dir.to_string_lossy()])
+    }
 }
 
 #[tauri::command]
 pub fn reveal_path(path: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
+    #[cfg(windows)]
     let p = path.replace('/', "\\");
-    let arg = if std::path::Path::new(&p).is_dir() { format!("\"{p}\"") } else { format!("/select,\"{p}\"") };
-    std::process::Command::new("explorer")
-        .raw_arg(arg)
-        .creation_flags(0x0800_0000)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    #[cfg(not(windows))]
+    let p = local_path(path.trim());
+    reveal(&p)
 }

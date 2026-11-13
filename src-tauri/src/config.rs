@@ -90,7 +90,8 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            hotkey: "Ctrl+Alt+Space".into(),
+            // macOS 上 Ctrl+Option+Space 是系统的"切换输入法"，默认改用 Option+Space
+            hotkey: if cfg!(target_os = "macos") { "Alt+Space" } else { "Ctrl+Alt+Space" }.into(),
             backend: "claude".into(),
             lang: "auto".into(),
             stt_engine: "local".into(),
@@ -128,9 +129,18 @@ pub fn config_dir(app: &AppHandle) -> PathBuf {
     d
 }
 
-/// 不依赖 AppHandle 的版本（MCP 子进程用）：%APPDATA%/com.user.saydo
+/// 不依赖 AppHandle 的版本（MCP 子进程用）。必须和 Tauri 的 app_config_dir 是同一个目录：
+/// Windows = %APPDATA%/com.user.saydo，macOS = ~/Library/Application Support/com.user.saydo
 pub fn config_dir_static() -> PathBuf {
+    #[cfg(windows)]
     let base = std::env::var("APPDATA").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
+    #[cfg(target_os = "macos")]
+    let base = std::env::var("HOME").map(|h| PathBuf::from(h).join("Library/Application Support")).unwrap_or_else(|_| std::env::temp_dir());
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let base = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|_| std::env::temp_dir());
     base.join("com.user.saydo")
 }
 

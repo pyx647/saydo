@@ -40,7 +40,7 @@ pub fn start(app: AppHandle) -> Result<Recorder, String> {
         let dev = match host.default_input_device() {
             Some(d) => d,
             None => {
-                let _ = ready_tx.send(Err("没有找到麦克风（请检查 Windows 声音设置/隐私里的麦克风权限）".into()));
+                let _ = ready_tx.send(Err("没有找到麦克风（请检查系统的声音设置 / 隐私里的麦克风权限）".into()));
                 return vec![];
             }
         };

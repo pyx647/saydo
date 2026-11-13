@@ -150,8 +150,30 @@ fn memory_block(cfg: &Config) -> String {
 }
 
 /// 前台软件 → 怎么连上"它正在运行的这个实例"来操作（而不是另开一个 / 离线生成文件）
-fn app_hint(exe: &str) -> Option<&'static str> {
-    Some(match exe.to_lowercase().as_str() {
+#[cfg(target_os = "macos")]
+fn app_hint(fg: &crate::capture::FgInfo) -> Option<&'static str> {
+    Some(match fg.bundle.as_str() {
+        "com.microsoft.Powerpoint" => "用 AppleScript 操作正在运行的实例：`osascript -e 'tell application \"Microsoft PowerPoint\" to …'`（`active presentation`、`slides`）；新建演示文稿用 `make new presentation`",
+        "com.microsoft.Word" => "用 AppleScript 操作正在运行的实例：`tell application \"Microsoft Word\"`（`active document`、`selection`）；新建文档用 `make new document`",
+        "com.microsoft.Excel" => "用 AppleScript 操作正在运行的实例：`tell application \"Microsoft Excel\"`（`active workbook`、`active sheet`、`selection`）；新建工作簿用 `make new workbook`",
+        "com.microsoft.Outlook" => "用 AppleScript 操作正在运行的 Outlook：`tell application \"Microsoft Outlook\"`（发信等对外动作先让用户确认）",
+        "com.apple.iWork.Keynote" | "com.apple.Keynote" => "用 AppleScript 操作正在运行的 Keynote：`tell application \"Keynote\" to tell front document`（`current slide`、`slides`）；新建用 `make new document`",
+        "com.apple.iWork.Pages" | "com.apple.Pages" => "用 AppleScript 操作正在运行的 Pages：`tell application \"Pages\" to tell front document`（`body text`、`selection`）",
+        "com.apple.iWork.Numbers" | "com.apple.Numbers" => "用 AppleScript 操作正在运行的 Numbers：`tell application \"Numbers\" to tell front document`（`active sheet`、`tables`、`selection range`）",
+        "com.apple.mail" => "用 AppleScript 操作「邮件」：`tell application \"Mail\"`（`selection` 是选中的邮件；发信等对外动作先让用户确认）",
+        "com.apple.Notes" => "用 AppleScript 操作「备忘录」：`tell application \"Notes\"`",
+        "com.apple.finder" => "用 AppleScript 操作访达：`tell application \"Finder\"`（`selection`、`insertion location` 是当前窗口所在的文件夹）",
+        "com.apple.Safari" => "用 AppleScript 操作**已经打开的标签页**：`tell application \"Safari\" to tell front document`（`URL`、`source`、`do JavaScript`），不要另外启动新的浏览器",
+        "com.google.Chrome" | "com.microsoft.edgemac" | "com.brave.Browser" | "company.thebrowser.Browser" => "用你的浏览器工具（Claude in Chrome 扩展）操作**已经打开的标签页**，不要另外启动新的浏览器",
+        "md.obsidian" => "Obsidian 会自动刷新 vault 里被改动的 md 文件，直接读写文件即可（需要时可用它的命令行）",
+        "com.apple.dt.Xcode" => "用 AppleScript（`tell application \"Xcode\"`）或 `xcodebuild` 操作正在打开的工程",
+        _ => return None,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn app_hint(fg: &crate::capture::FgInfo) -> Option<&'static str> {
+    Some(match fg.exe.to_lowercase().as_str() {
         "powerpnt.exe" => "用 COM 连接正在运行的实例：`[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')`；新建演示文稿用它的 `Presentations.Add()`",
         "winword.exe" => "用 COM 连接正在运行的实例：`GetActiveObject('Word.Application')`；新建文档用 `Documents.Add()`",
         "excel.exe" => "用 COM 连接正在运行的实例：`GetActiveObject('Excel.Application')`；新建工作簿用 `Workbooks.Add()`",
@@ -223,7 +245,7 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
     if let Some(d) = &inp.doc_ctx {
         ctx.push_str(d);
     }
-    if let Some(h) = app_hint(&inp.fg.exe) {
+    if let Some(h) = app_hint(&inp.fg) {
         ctx.push_str(&format!("- 前台软件的操作方式：{h}\n"));
     }
 
@@ -236,7 +258,8 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
     }
 
     let mut p = String::new();
-    p.push_str("你是 SayDo —— 用户在 Windows 11 上通过【选中内容 + 按住热键说话】唤起的桌面快捷 Agent。\n");
+    let mac = cfg!(target_os = "macos");
+    p.push_str(&format!("你是 SayDo —— 用户在 {} 上通过【选中内容 + 按住热键说话】唤起的桌面快捷 Agent。\n", if mac { "macOS" } else { "Windows 11" }));
     p.push_str("你的回答会显示在一个很小的弹窗里：只给结论或成品，简洁，不寒暄、不复述任务、不解释你做了哪些步骤（除非用户问）。用户说什么语言就用什么语言回答。\n\n");
     let mem = memory_block(cfg);
     if !mem.is_empty() {
@@ -252,7 +275,7 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
     p.push_str(&format!("\n## 用户的语音指令\n「{}」\n\n", inp.instruction.trim()));
     p.push_str("## 规则\n");
     p.push_str("1. 指令针对\"当前页面/屏幕/界面\"时，以截图为准；否则以选中的文字/文件为操作对象。\n");
-    p.push_str("2. 对文件操作（转格式、重命名、压缩、提取内容等）：直接动手做。输出文件默认放在原文件同一目录；绝不覆盖已存在的文件（重名就加 (1)）；删除只能进回收站。\n");
+    p.push_str("2. 对文件操作（转格式、重命名、压缩、提取内容等）：直接动手做。输出文件默认放在原文件同一目录；绝不覆盖已存在的文件（重名就加 (1)）；删除只能进回收站。\n".replace("回收站", if mac { "废纸篓" } else { "回收站" }).as_str());
     if with_mcp {
         p.push_str("3. 需要用户选择文件夹时，调用 saydo 的 `pick_folder` 工具；需要用户拍板（发邮件、对外分享、覆盖、不可逆操作）时，调用 `confirm` 工具，不要自己猜。需要看屏幕时，上下文里有截图文件就直接读那个文件，没有才调用 `screenshot`。\n");
     } else {
@@ -263,11 +286,14 @@ pub fn build_prompt(app: &AppHandle, cfg: &Config, inp: &RunInput, with_mcp: boo
     p.push_str("6. **优先在正在运行的软件里完成**：用户要改的东西属于某个正在运行的软件（前台就是它，或者任务明显指它，比如做 / 改 PPT 而 PowerPoint 开着），就连接那个**正在运行的实例**来做，用户当场就能看到。用户明确说「新建 / 再做一个」，或者前台没有相关文档时，也**在这个正在运行的软件里新建**，而不是在后台离线生成一个文件再让用户自己去打开。只有那个软件没在运行、也没有可用接口时，才退而生成文件，并说明原因。\n");
     if let Some(sd) = &inp.scratch {
         p.push_str(&format!(
-            "7. **文件放哪里**：这个任务有专用的临时文件夹 `{}`。所有中间产物（草稿、测试图、转换过程里的文件、临时脚本、反复修改的版本）一律放在这个文件夹里，任务结束后 SayDo 会自动清理它；**绝对不要把中间文件放到桌面、下载或文档里**。只有最终成品才放到用户要的位置：有原文件就放原文件同一目录；没有原文件时，放进 `文档\\SayDo输出\\<任务名>\\`（一个任务一个子文件夹），**不要放桌面**。成品只留用户真正要的那几个文件，不要留多个版本。\n",
-            sd.display()
+            "7. **文件放哪里**：这个任务有专用的临时文件夹 `{}`。所有中间产物（草稿、测试图、转换过程里的文件、临时脚本、反复修改的版本）一律放在这个文件夹里，任务结束后 SayDo 会自动清理它；**绝对不要把中间文件放到桌面、下载或文档里**。只有最终成品才放到用户要的位置：有原文件就放原文件同一目录；没有原文件时，放进 `{}`（一个任务一个子文件夹），**不要放桌面**。成品只留用户真正要的那几个文件，不要留多个版本。\n",
+            sd.display(),
+            if mac { "~/Documents/SayDo输出/<任务名>/" } else { "文档\\SayDo输出\\<任务名>\\" }
         ));
     }
-    if inp.doc_ctx.is_some() {
+    if inp.doc_ctx.is_some() && mac {
+        p.push_str("8. 上面标出的那份文档（同时开着多份时，是用户**当前聚焦的那一份**）就是用户说的\"这个 PPT / 这份文档 / 这个表格 / 这一页\"。要修改它，就**直接改这份正在打开的文档**：用 AppleScript（`osascript`，`tell application \"Microsoft PowerPoint\"` / `\"Keynote\"` 等）操作已打开的对象，改动会立刻出现在用户眼前。**不要新建另一个文件，不要另存为副本，不要改磁盘上的同名文件**，除非用户明确说了\"另存 / 复制一份 / 新建\"。改完不要自动保存或关闭文档，除非用户要求。AppleScript 连不上（比如用户没给自动化权限）就如实告诉用户原因，不要悄悄改做一个新文件。\n");
+    } else if inp.doc_ctx.is_some() {
         p.push_str("8. 上面标出的那份 Office 文档（同时开着多份时，是用户**当前聚焦的那一份**，已按前台窗口标题挑好）就是用户说的\"这个 PPT / 这份文档 / 这个表格 / 这一页\"。要修改它，就**直接改这份正在打开的文档**：用 PowerShell 的 COM（`[Runtime.InteropServices.Marshal]::GetActiveObject('PowerPoint.Application')`，Word / Excel 同理）操作已打开的对象，改动会立刻出现在用户眼前。**不要新建另一个文件，不要另存为副本，不要改磁盘上的同名文件**，除非用户明确说了\"另存 / 复制一份 / 新建\"。改完不要自动保存或关闭文档，除非用户要求。COM 连不上就如实告诉用户原因，不要悄悄改做一个新文件。\n");
     }
     if !cfg.extra_prompt.trim().is_empty() {
@@ -284,7 +310,15 @@ pub fn extract_files(text: &str) -> (String, Vec<String>) {
         let t = line.trim().trim_start_matches(['-', '*', '•', '📎', ' ']).trim();
         let up = t.to_ascii_uppercase();
         if up.starts_with("FILE:") || up.starts_with("FILE：") {
-            let path = t[5..].trim().trim_matches(['`', '"', '\'', '*', ' ']).replace('/', "\\");
+            let path = t[5..].trim().trim_matches(['`', '"', '\'', '*', ' ']).to_string();
+            #[cfg(windows)]
+            let path = path.replace('/', "\\");
+            // macOS / Linux：把 ~/ 展开成真实路径
+            #[cfg(not(windows))]
+            let path = match (path.strip_prefix("~/"), std::env::var("HOME")) {
+                (Some(rest), Ok(home)) => format!("{home}/{rest}"),
+                _ => path,
+            };
             if Path::new(&path).exists() && !files.contains(&path) {
                 files.push(path);
             }

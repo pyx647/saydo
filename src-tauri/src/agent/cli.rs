@@ -19,8 +19,17 @@ pub fn find_exe(name: &str, override_path: &str) -> Option<PathBuf> {
     }
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
+        #[cfg(windows)]
         for ext in ["exe", "cmd", "bat"] {
             let p = dir.join(format!("{name}.{ext}"));
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+        // macOS / Linux：没有扩展名（PATH 已在启动时用登录 shell 的补全过，见 proc::fix_path_env）
+        #[cfg(not(windows))]
+        {
+            let p = dir.join(name);
             if p.is_file() {
                 return Some(p);
             }
@@ -30,8 +39,7 @@ pub fn find_exe(name: &str, override_path: &str) -> Option<PathBuf> {
 }
 
 fn kill_tree(pid: u32) {
-    use std::os::windows::process::CommandExt;
-    let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).creation_flags(0x0800_0000).output();
+    crate::proc::kill_tree(pid)
 }
 
 fn split_args(s: &str) -> Vec<String> {
@@ -59,8 +67,8 @@ async fn run_stream(
         .stdin(if stdin_text.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .creation_flags(0x0800_0000);
+        .kill_on_drop(true);
+    crate::proc::hide_tokio(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("启动 {} 失败：{e}", exe.display()))?;
     let pid = child.id().unwrap_or(0);
     crate::session::set_run_pid(pid);

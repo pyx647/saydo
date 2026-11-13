@@ -84,7 +84,7 @@ const READONLY_VERBS: &[&str] = &[
     "get", "list", "search", "read", "find", "query", "fetch", "view", "describe", "show", "status", "check", "lookup", "download", "export", "count", "snapshot", "screenshot", "analyze", "summar",
 ];
 const DANGEROUS_CMD: &[&str] = &[
-    "rm -r", "rm -f", "rm -fr", "remove-item", "del /s", "del /q", "rmdir /s", "rd /s", "format ", "shutdown", "stop-computer", "restart-computer", "reg delete", "git push", "git reset --hard",
+    "rm -r", "rm -f", "rm -fr", "remove-item", "del /s", "del /q", "rmdir /s", "rd /s", "format ", "shutdown", "stop-computer", "restart-computer", "reg delete", "git push", "git reset --hard", "sudo ", "diskutil ", "mkfs", "dd if=", "killall ",
     "git clean", "diskpart", "mkfs", "iex", "invoke-expression", "invoke-webrequest", "curl ", "wget ", "sudo ", "taskkill", "stop-process", "set-executionpolicy", "net user", "schtasks", "cipher /w",
 ];
 

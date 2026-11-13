@@ -24,6 +24,44 @@ gh run download <run-id> --repo pyx647/saydo -n SayDo-windows -D build   # 得�
 
 > 原 Python 版（`app/`、`saydo.pyw`）仍保留，功能更少，不再维护。
 
+### macOS 版
+
+同一套 Rust / Tauri 代码，macOS 专用部分在 `src-tauri/src/mac.rs`、`capture_mac.rs`。同样在 GitHub Actions 上编译（`Build macOS` 工作流），产物是两个 dmg：
+
+```bash
+gh run download <run-id> --repo pyx647/saydo -n SayDo-macos-apple-silicon -D build   # M 系列芯片
+```
+
+```bash
+gh run download <run-id> --repo pyx647/saydo -n SayDo-macos-intel -D build           # Intel 芯片
+```
+
+把 `SayDo.app` 拖进"应用程序"。安装包没有 Apple 开发者签名（只有临时签名），第一次打开前先去掉隔离标记，否则系统会说"已损坏"：
+
+```bash
+xattr -cr /Applications/SayDo.app
+```
+
+首次运行要在 **系统设置 → 隐私与安全性** 里给 SayDo 三项权限：
+
+| 权限 | 用来做什么 | 不给会怎样 |
+|---|---|---|
+| **辅助功能** | 监听全局热键、读取选中的文字、模拟 ⌘C / ⌘V | 热键完全没反应（勾选后几秒内自动生效，不用重启） |
+| **屏幕录制** | 按下热键时截一张当前窗口 | 截图里只有桌面壁纸 |
+| **麦克风** | 听你说话 | 录不到声音 |
+
+另外第一次操作 PowerPoint / Keynote / 访达等程序时，系统会问"SayDo 想要控制 xxx"，点允许。
+> 因为是临时签名，**每次换新版本后这些权限要重新勾一次**（先在列表里删掉旧的 SayDo 再加）。
+
+和 Windows 版的差别：
+
+- 默认热键是 **⌥ Option + Space**（Ctrl+Option+Space 是系统的切换输入法）。设置里可改，`Alt` = Option，`Cmd` = Command；鼠标侧键同样支持。
+- SayDo 是菜单栏程序，不在程序坞显示图标：左键点菜单栏图标打开设置，右键是菜单。
+- 选中的文字先用辅助功能接口直接读（不动剪贴板）；读不到（Chrome、访达里选的文件等）才模拟 ⌘C，读完还原剪贴板。
+- 前台文档识别支持 PowerPoint / Word / Excel 和 Keynote / Pages / Numbers，通过 AppleScript（Windows 上是 COM）。
+- 配置、语音模型、截图在 `~/Library/Application Support/com.user.saydo/`。
+- 从访达启动的程序拿不到终端的 PATH，SayDo 启动时会向登录 shell 要一次完整 PATH 来找 `claude` / `codex` / `agy`；仍找不到就在 设置 → 后端 里填完整路径。
+
 ## 速度与内存（本机实测）
 
 | 项 | 数值 |

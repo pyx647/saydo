@@ -1,0 +1,57 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, macos]
+
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            name: apple-silicon
+          - target: x86_64-apple-darwin
+            name: intel
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.2.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          key: ${{ matrix.target }}
+          cache-on-failure: true
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        if: matrix.target == 'aarch64-apple-darwin'
+        working-directory: src-tauri
+        run: cargo test --locked --lib
+
+      - name: Build app + dmg
+        run: pnpm tauri build --target ${{ matrix.target }}
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: SayDo-macos-${{ matrix.name }}
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          if-no-files-found: error
