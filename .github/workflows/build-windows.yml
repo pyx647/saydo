@@ -30,6 +30,12 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # ort-sys 的构建脚本会把 DirectML.dll 放进 target/<profile>/{deps,examples}；
+      # 没有缓存的全新构建里这些目录还不存在，脚本会直接崩，所以先建好
+      - name: Prepare target dirs
+        shell: bash
+        run: mkdir -p src-tauri/target/{debug,release}/{deps,examples}
+
       - name: Cargo check
         working-directory: src-tauri
         run: cargo check --locked
