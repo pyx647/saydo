@@ -216,7 +216,8 @@ fn ctc_decode(ids: &[i64], vocab: &[String]) -> String {
         }
         prev = id;
     }
-    out.join("")
+    // 英文等语言用 SentencePiece 分词，"▁" 标记一个词的开头，要还原成空格，否则会原样显示成 please▁save
+    out.join("").replace('▁', " ").trim().to_string()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -332,17 +333,21 @@ fn get_session(app: &AppHandle) -> Result<std::sync::MutexGuard<'static, Option<
 // 对外接口
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// 语言代码 → 模型语言 ID（0=auto,1=zh,2=en,3=yue,4=ja,5=ko）
+/// 语言代码 → 模型语言 ID。数值来自模型 metadata 里的 lang_*：
+/// auto=0, zh=3, en=4, yue=7, ja=11, ko=12（不是连续的 1..5，写错了等于没指定语言）
 pub fn lang_id(lang: &str) -> i32 {
     match lang {
-        "zh" => 1,
-        "en" => 2,
-        "yue" => 3,
-        "ja" => 4,
-        "ko" => 5,
+        "zh" => 3,
+        "en" => 4,
+        "yue" => 7,
+        "ja" => 11,
+        "ko" => 12,
         _ => 0, // auto
     }
 }
+
+/// text_norm 输入：模型 metadata 里 with_itn=14（带标点、数字规整、英文大小写），without_itn=15
+const TEXT_NORM_WITH_ITN: i32 = 14;
 
 /// 转录 16kHz 单声道 f32 PCM，返回文字。
 pub fn transcribe(app: &AppHandle, pcm: &[f32], lid: i32) -> Result<String, String> {
@@ -374,7 +379,7 @@ pub fn transcribe(app: &AppHandle, pcm: &[f32], lid: i32) -> Result<String, Stri
     let arr3 = Array3::from_shape_vec((1, t, FEAT_DIM), flat).map_err(|e| e.to_string())?;
     let len_arr = Array1::from_vec(vec![t as i32]);
     let lang_arr = Array1::from_vec(vec![lid]);
-    let tn_arr = Array1::from_vec(vec![0i32]); // withitn=0
+    let tn_arr = Array1::from_vec(vec![TEXT_NORM_WITH_ITN]);
 
     let sess = guard.as_mut().ok_or("模型未加载")?;
 
@@ -459,5 +464,28 @@ pub fn transcribe_cloud(cfg: &crate::config::ApiCfg, pcm: &[f32], lang: &str) ->
             Err(format!("云端转写失败 HTTP {code}: {}", t.chars().take(200).collect::<String>()))
         }
         Err(e) => Err(format!("云端转写请求失败: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lang_ids_match_model_metadata() {
+        assert_eq!(lang_id("auto"), 0);
+        assert_eq!(lang_id("zh"), 3);
+        assert_eq!(lang_id("en"), 4);
+        assert_eq!(lang_id("yue"), 7);
+        assert_eq!(lang_id("ja"), 11);
+        assert_eq!(lang_id("ko"), 12);
+        assert_eq!(lang_id(""), 0);
+    }
+
+    #[test]
+    fn ctc_decode_restores_word_spaces() {
+        let vocab: Vec<String> = ["<blk>", "▁please", "▁save", "<|zh|>", "好"].iter().map(|s| s.to_string()).collect();
+        // 连续重复合并、0 是空白、<|…|> 特殊标记丢弃、"▁" 还原成空格
+        assert_eq!(ctc_decode(&[1, 1, 0, 2, 3, 4], &vocab), "please save好");
     }
 }
