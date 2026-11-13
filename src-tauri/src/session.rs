@@ -121,6 +121,10 @@ fn caption_loop(app: AppHandle, s: Arc<Session>) {
         if pcm.len() > 16000 * 20 {
             pcm = pcm[pcm.len() - 16000 * 20..].to_vec();
         }
+        // 静音喂给模型会"幻听"出一个不相干的字（比如韩语的"그"），直接跳过
+        if audio::is_silent(&pcm) {
+            continue;
+        }
         audio::normalize(&mut pcm);
         if let Ok(t) = stt::transcribe(&app, &pcm, stt::lang_id(&cfg.lang)) {
             let t = t.trim();
@@ -279,6 +283,18 @@ pub fn on_up(app: AppHandle) {
             return;
         }
 
+        if audio::is_silent(&pcm) {
+            crate::log::log(&format!("session {}: audio is pure silence (no mic permission?)", s.id));
+            ui::emit_error(
+                &app,
+                if cfg!(target_os = "macos") {
+                    "没有录到任何声音：请在 系统设置 → 隐私与安全性 → 麦克风 里允许 SayDo，并确认输入设备没有静音"
+                } else {
+                    "没有录到任何声音：请检查麦克风权限，并确认输入设备没有静音"
+                },
+            );
+            return;
+        }
         ui::emit(&app, json!({ "phase": "transcribing" }));
         audio::normalize(&mut pcm);
         let r = if cfg.stt_engine == "cloud" {

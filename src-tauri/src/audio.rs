@@ -146,6 +146,12 @@ pub fn resample_to_16k(input: &[f32], sr: u32) -> Vec<f32> {
     out
 }
 
+/// 录到的是不是"纯静音"（峰值几乎为 0）。真实麦克风哪怕没人说话也有底噪；
+/// 全是 0 基本只有一种情况：系统没给麦克风权限（macOS 这时不报错，只给一串 0），或者麦克风被静音了。
+pub fn is_silent(pcm: &[f32]) -> bool {
+    pcm.iter().fold(0f32, |m, x| m.max(x.abs())) < 0.0005
+}
+
 /// 峰值归一化（说话太轻时提高识别率），最多放大 8 倍
 pub fn normalize(pcm: &mut [f32]) {
     let peak = pcm.iter().fold(0f32, |m, x| m.max(x.abs()));

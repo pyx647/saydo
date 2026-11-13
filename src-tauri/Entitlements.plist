@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 麦克风：没有这一项时系统不弹授权、录到的全是静音 -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <!-- 用 AppleScript 控制 PowerPoint / Keynote / 访达等 -->
+  <key>com.apple.security.automation.apple-events</key>
+  <true/>
+</dict>
+</plist>
