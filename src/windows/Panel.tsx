@@ -194,7 +194,7 @@ export default function Panel() {
   if (pillKind === "working" && !hover) {
     return (
       <div ref={cardRef} className="stack" {...handlers}>
-        <div data-part className="pwin orb-only" data-drag title="SayDo 正在执行（悬停查看进度）">
+        <div data-part className="pwin orb-only" data-drag>
           <div className="mic-orb busy" data-drag><Loader2 size={15} className="spin" /></div>
         </div>
       </div>
@@ -287,7 +287,7 @@ function Pill({ kind, levels }: { kind: "listening" | "busy" | "working"; levels
       ) : (
         <VoiceCurve level={level} idle={kind === "busy"} />
       )}
-      <button className="xbtn sm" onPointerDown={(e) => { e.stopPropagation(); void api.hide(); }} title="取消 (Esc)"><X size={13} /></button>
+      <button className="xbtn sm" onPointerDown={(e) => { e.stopPropagation(); void api.hide(); }}><X size={13} /></button>
     </div>
   );
 }
@@ -298,7 +298,7 @@ function ProgressBubble({ said, asst }: { said: string; asst?: AsstMsg }) {
   const lastText = asst?.text ? asst.text.split("\n").filter(Boolean).slice(-1)[0] : "";
   return (
     <div data-part className="pwin pbub" data-drag style={{ ["--r" as string]: "16px", width: 300 }}>
-      {said && <div className="pbub-main" title={said}>{said}</div>}
+      {said && <div className="pbub-main">{said}</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: said ? 7 : 0 }}>
         {steps.length === 0 && !lastText && <div className="pbub-sub">思考中…</div>}
         {steps.map((s, i) => {
@@ -337,9 +337,9 @@ function CaptionBubble({ kind, caption, said, ctx, asst }: { kind: "listening" |
   return (
     <div data-part className="pwin pbub" data-drag style={{ ["--r" as string]: "16px" }}>
       {main && (
-        <div className={hint ? "pbub-hint" : "pbub-main"} title={main}>{main}</div>
+        <div className={hint ? "pbub-hint" : "pbub-main"}>{main}</div>
       )}
-      {sub && <div className="pbub-sub" title={sub}>{sub}</div>}
+      {sub && <div className="pbub-sub">{sub}</div>}
     </div>
   );
 }
@@ -350,11 +350,11 @@ function CardHead({ said, right }: { said: string; right?: React.ReactNode }) {
   return (
     <div data-drag style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 10px 0 16px" }}>
       <Sparkles size={15} style={{ color: "#b79cff", flex: "none" }} />
-      <div data-drag style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={said}>
+      <div data-drag style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {said ? `「${said}」` : "SayDo"}
       </div>
       {right}
-      <button className="btn iconbtn" style={{ background: "transparent", border: "none" }} onClick={() => api.hide()} title="关闭 (Esc)"><X size={16} /></button>
+      <button className="btn iconbtn" style={{ background: "transparent", border: "none" }} onClick={() => api.hide()}><X size={16} /></button>
     </div>
   );
 }
@@ -365,7 +365,7 @@ function ResultCard({ m, said, onExpand }: { m: AsstMsg; said: string; onExpand:
     <div>
       <CardHead
         said={said}
-        right={<button className="btn iconbtn" style={{ background: "transparent", border: "none" }} onClick={onExpand} title="展开成对话窗口，继续追问"><Maximize2 size={14} /></button>}
+        right={<button className="btn iconbtn" style={{ background: "transparent", border: "none" }} onClick={onExpand}><Maximize2 size={14} /></button>}
       />
       <div style={{ padding: "8px 16px 14px" }}>
         {hasText && <div className="md" style={{ maxHeight: 240, overflowY: "auto", paddingRight: 4, fontSize: 14 }}><Md>{m.text}</Md></div>}
@@ -456,12 +456,12 @@ function Chat({ st }: { st: St }) {
         </div>
         <div style={{ flex: 1 }} data-drag />
         {st.ctx && st.ctx.kind !== "none" && st.ctx.kind !== "pending" && (
-          <span className="chip" title={st.ctx.preview || st.ctx.title} style={{ maxWidth: 150 }}>
+          <span className="chip" style={{ maxWidth: 150 }}>
             {st.ctx.kind === "files" ? <FileTypeIcon ext={st.ctx.files[0]?.ext ?? ""} dir={st.ctx.files[0]?.isDir} size={12} /> : st.ctx.kind === "screen" ? <MonitorUp size={12} /> : <ScanText size={12} />}
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{st.ctx.label}</span>
           </span>
         )}
-        <button className="xbtn" style={{ width: 28, height: 28, background: "transparent" }} onClick={() => api.hide()} title="关闭 (Esc)"><X size={16} /></button>
+        <button className="xbtn" style={{ width: 28, height: 28, background: "transparent" }} onClick={() => api.hide()}><X size={16} /></button>
       </div>
 
       <div className="msgs" ref={listRef}>
@@ -481,7 +481,7 @@ function Chat({ st }: { st: St }) {
         <input ref={inputRef} value={v} placeholder="输入消息…" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go(v)} />
         <Mic size={19} style={{ color: "#8f93a8", flex: "none" }} aria-label="按住热键说话" />
         <div className="vdiv" />
-        <button className="send" onClick={() => go(v)} title="发送"><ArrowUp size={20} /></button>
+        <button className="send" onClick={() => go(v)}><ArrowUp size={20} /></button>
       </div>
     </>
   );
@@ -559,7 +559,7 @@ function Actions({ m }: { m: AsstMsg }) {
         </button>
       )}
       {hasText && m.canReplace && (
-        <button className="btn btn-primary" onClick={() => api.replace(m.text)} title="把结果粘贴回刚才选中文字的位置"><Replace size={14} /> 替换原文</button>
+        <button className="btn btn-primary" onClick={() => api.replace(m.text)}><Replace size={14} /> 替换原文</button>
       )}
       {m.files.length > 1 && <button className="btn" onClick={() => api.revealPath(m.files[0].path)}><FolderOpen size={14} /> 所在文件夹</button>}
       <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)" }}>{BACKEND_NAMES[m.backend] ?? m.backend} · {m.elapsed}s</span>
@@ -587,14 +587,14 @@ function FileCard({ f }: { f: FileView }) {
         <FileTypeIcon ext={f.ext} dir={f.isDir} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.path}>{f.name}</div>
-        <div style={{ fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }} title={f.path}>
+        <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "rtl", textAlign: "left" }}>
           <bdi>{f.dir}{f.isDir ? "" : ` · ${fmtSize(f.size)}`}</bdi>
         </div>
       </div>
-      <button className="btn iconbtn" title="打开" onClick={() => api.openPath(f.path)}><Eye size={14} /></button>
-      <button className="btn iconbtn" title="在文件夹中显示" onClick={() => api.revealPath(f.path)}><FolderOpen size={14} /></button>
-      <button className="btn iconbtn" title="复制路径" onClick={() => { navigator.clipboard.writeText(f.path); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>
+      <button className="btn iconbtn" onClick={() => api.openPath(f.path)}><Eye size={14} /></button>
+      <button className="btn iconbtn" onClick={() => api.revealPath(f.path)}><FolderOpen size={14} /></button>
+      <button className="btn iconbtn" onClick={() => { navigator.clipboard.writeText(f.path); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>
         {copied ? <Check size={14} style={{ color: "var(--ok)" }} /> : <ClipboardCopy size={14} />}
       </button>
     </div>
@@ -620,7 +620,7 @@ function Ask({ s }: { s: AskSpec }) {
             <div style={{ fontWeight: 600 }}>{s.title}</div>
             {s.detail && <div style={{ fontSize: 11.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.detail}</div>}
           </div>
-          <button className="btn iconbtn" onClick={() => reply({ cancel: true })} title="取消"><X size={14} /></button>
+          <button className="btn iconbtn" onClick={() => reply({ cancel: true })}><X size={14} /></button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 230, overflowY: "auto" }}>
           {(s.suggestions ?? []).slice(0, 8).map((f) => (
