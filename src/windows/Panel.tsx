@@ -101,6 +101,13 @@ export default function Panel() {
     const un = [
       listenSync<PanelState>("panel-state", (e) => {
         if (e.payload.phase === "listening") setLevels(Array(WAVE_N).fill(0.05));
+        // 新一轮开始 / 面板收起时清掉"悬停"状态。窗口被隐藏、或程序不在前台（菜单栏程序大多时候都是）时，
+        // 系统不会再发"指针离开"事件，悬停会一直卡在 true，执行中就永远展开成进度条、变不成小球。
+        if (e.payload.phase === "listening" || e.payload.phase === "heard" || e.payload.phase === "idle") {
+          window.clearTimeout(leaveTimer.current);
+          hoverRef.current = false;
+          setHover(false);
+        }
         dispatch(e.payload);
       }),
       listenSync<number>("audio-level", (e) => setLevels((l) => [...l.slice(1), Math.max(0.05, e.payload)])),
