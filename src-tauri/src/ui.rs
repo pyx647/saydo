@@ -137,6 +137,12 @@ pub fn esc_cancellable() -> bool {
     PANEL_SHOWN.load(Ordering::Relaxed) && CANCELLABLE.load(Ordering::Relaxed)
 }
 
+/// 面板正显示着"结果 / 报错 / 提问"这类静态卡片（不是在聆听、转写、执行中）。
+/// 这时再按热键 = 接着当前这段对话说话；面板已经收起（看完关掉了）才是新对话。
+pub fn result_showing() -> bool {
+    PANEL_SHOWN.load(Ordering::Relaxed) && !CANCELLABLE.load(Ordering::Relaxed)
+}
+
 /// 面板是否固定停靠在屏幕底部正中（用户拖动过就变成 false，下次按热键再停靠）
 static DOCKED: AtomicBool = AtomicBool::new(true);
 static MON_PT: Mutex<(i32, i32)> = Mutex::new((0, 0));

@@ -231,8 +231,16 @@ export default function Panel() {
     );
   }
   if (pillKind) {
+    // 追问时（结果卡还开着，直接按热键接着说）：上一轮的对话 / 结果继续留在上面，不收起；
+    // 只有"执行中"才缩成小球（上面已处理）
+    const keepPrev = st.hasPrev && pillKind !== "working" && !!asst && asst.status !== "working";
     return (
       <div ref={cardRef} className="stack" {...handlers}>
+        {keepPrev && (
+          <div data-part className="pwin" style={{ width: 340, ["--r" as string]: st.expanded ? "24px" : "20px" }}>
+            {st.expanded ? <Chat st={st} /> : asst!.status === "error" ? <ErrorCard msg={asst!.text} said={st.said} /> : <ResultCard m={asst!} said={st.said} onExpand={() => dispatch({ phase: "__expand" })} />}
+          </div>
+        )}
         {pillKind === "working" ? (
           <ProgressBubble said={st.said} asst={asst} />
         ) : (

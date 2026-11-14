@@ -140,13 +140,19 @@ fn caption_loop(app: AppHandle, s: Arc<Session>) {
 
 pub fn on_down(app: AppHandle) {
     let seq = PRESS_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    // 按下的瞬间面板是不是正显示着上一轮的结果（要在任何取消 / 隐藏动作之前判断）
+    let result_up = ui::result_showing();
     std::thread::spawn(move || {
         cancel_current(&app);
         let fg = capture::foreground();
         let cursor = capture::cursor_xy();
         let prev = cur().lock().unwrap().clone();
-        // 前台就是 SayDo 自己的弹窗 → 这是在对上一轮结果"追问"：沿用上一轮的上下文，不再抓选区
-        let from_self = fg.pid == std::process::id();
+        // 追问 = 对上一轮结果接着说：沿用上一轮的上下文，不再抓选区。两种情况：
+        //  1. 前台就是 SayDo 自己的弹窗（用户点过它）；
+        //  2. 结果卡还开着（面板不抢焦点，前台仍是原来的程序）且上一轮有结果 → 直接按热键就接着聊，不用先点它。
+        // 结果卡已经关掉就是新对话。
+        let has_prev_answer = prev.as_ref().map(|p| p.last.lock().unwrap().is_some()).unwrap_or(false);
+        let from_self = fg.pid == std::process::id() || (result_up && has_prev_answer);
         let (fg, sel, ready) = match (&prev, from_self) {
             (Some(p), true) => (p.fg.clone(), p.sel.lock().unwrap().clone(), true),
             _ => (fg, Selection::None, false),
@@ -231,7 +237,7 @@ pub fn on_down(app: AppHandle) {
         }
         ui::interactive(&app, false);
         let pending = ui::CtxView { kind: "pending".into(), label: "正在读取选中内容…".into(), app: s.fg.exe.clone(), title: s.fg.title.clone(), ..Default::default() };
-        ui::emit(&app, json!({ "phase": "listening", "ctx": if from_self { ui::ctx_view(&s.fg, &s.sel.lock().unwrap(), false) } else { pending } }));
+        ui::emit(&app, json!({ "phase": "listening", "followUp": from_self, "ctx": if from_self { ui::ctx_view(&s.fg, &s.sel.lock().unwrap(), false) } else { pending } }));
 
         if !from_self {
             let sel = capture::grab_selection(&s.fg);
