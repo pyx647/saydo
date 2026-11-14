@@ -206,6 +206,17 @@ pub fn show_panel_at(app: &AppHandle, cursor: (i32, i32)) {
     let _ = w.show();
     PANEL_SHOWN.store(true, Ordering::Relaxed);
     let _ = w.set_always_on_top(true);
+    // macOS：全屏应用在独立的桌面空间里，要在主线程上把面板的层级和空间行为设好，才不会被盖在全屏窗口下面。
+    // （set_always_on_top 每次都会把层级重置成普通浮动层，所以每次显示后都要设一遍）
+    #[cfg(target_os = "macos")]
+    {
+        let w2 = w.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Ok(p) = w2.ns_window() {
+                crate::mac::float_over_fullscreen(p);
+            }
+        });
+    }
 }
 
 pub fn hide_panel(app: &AppHandle) {

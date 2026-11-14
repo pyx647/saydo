@@ -157,6 +157,21 @@ pub fn screen_capture_allowed() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
 }
 
+/// 让窗口能浮在全屏应用之上（必须在主线程调用）：
+/// 全屏应用占着一个独立的"桌面空间"，普通置顶窗口（浮动层级）会被盖在下面。
+/// 要同时：加入所有空间 + 标记为"全屏辅助窗口"（NSWindowCollectionBehavior），并把层级抬到状态栏层级。
+pub fn float_over_fullscreen(ns_window: *mut c_void) {
+    if ns_window.is_null() {
+        return;
+    }
+    unsafe {
+        // CanJoinAllSpaces(1<<0) | IgnoresCycle(1<<6) | FullScreenAuxiliary(1<<8)
+        send1::<usize, ()>(ns_window, "setCollectionBehavior:", (1 << 0) | (1 << 6) | (1 << 8));
+        // NSStatusWindowLevel = 25（浮动层级是 3）
+        send1::<isize, ()>(ns_window, "setLevel:", 25);
+    }
+}
+
 /// 没有「屏幕录制」权限时请求一次（否则截图只有桌面壁纸）
 pub fn request_screen_capture() {
     unsafe {
