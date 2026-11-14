@@ -31,6 +31,7 @@ export type PanelState =
       danger?: boolean;
     }
   | { phase: "result"; text: string; files: FileView[]; canReplace: boolean; backend: string; elapsed: number; instruction: string }
+  | { phase: "resume"; said: string; text: string; backend: string }
   | { phase: "error"; message: string }
   | { phase: "input"; ctx: CtxView; hasPrev: boolean };
 
@@ -60,6 +61,9 @@ export type Config = {
 export type CliInfo = { id: string; name: string; found: boolean; path: string; version: string };
 export type HistoryEntry = { ts: number; instruction: string; result: string; backend: string; context: string; files: string[]; ok: boolean };
 
+export type Convo = { id: number; title: string; app: string; ts: number; turns: number; closed: boolean; said: string; text: string };
+export type ConvoList = { current: number; items: Convo[] };
+
 export const api = {
   getConfig: () => invoke<Config>("get_config"),
   saveConfig: (config: Config) => invoke<void>("save_config", { config }),
@@ -76,6 +80,10 @@ export const api = {
   replace: (text: string) => invoke<void>("panel_replace", { text }),
   layout: (l: { w: number; h: number; dpr: number; offx: number; offy: number; radius: number; parts?: { x: number; y: number; w: number; h: number; r: number }[] }) => invoke<void>("panel_layout", l),
   drag: () => invoke<void>("panel_drag"),
+  convoList: () => invoke<ConvoList | null>("convo_list"),
+  convoResume: (id: number) => invoke<void>("convo_resume", { id }),
+  convoClose: (id: number) => invoke<void>("convo_close", { id }),
+  convoDelete: (id: number) => invoke<void>("convo_delete", { id }),
   cursorInside: () => invoke<boolean>("panel_cursor_inside"),
   focus: () => invoke<void>("panel_focus"),
   autostartGet: () => invoke<boolean>("autostart_get"),

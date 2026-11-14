@@ -65,6 +65,15 @@ html.panel-root.tauri-transparent, html.panel-root.tauri-transparent body { back
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 0 18px rgba(139, 108, 255, 0.5);
 }
 .mic-orb.busy { background: radial-gradient(circle at 35% 28%, #8fb4ff, #4f7cf0 62%, #2f55c4); box-shadow: inset 0 0 0 1px rgba(255,255,255,.2), 0 0 18px rgba(79,124,240,.5); }
+.convo-bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px 9px 12px; border-top: 1px solid var(--line); }
+.convo-list { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.convo-list::-webkit-scrollbar { display: none; }
+.convo-chip { flex: none; max-width: 150px; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.convo-chip:hover { background: var(--accent-soft); border-color: rgba(169, 139, 255, 0.5); }
+.convo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.convo-hint { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.convo-end { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 12px; }
+.convo-end:hover { color: #ffd0d0; border-color: rgba(248, 113, 113, 0.5); background: rgba(248, 113, 113, 0.1); }
 .xbtn { width: 30px; height: 30px; border-radius: 50%; flex: none; display: grid; place-items: center; border: none; color: #cfd0dc; background: rgba(255, 255, 255, 0.1); transition: background 0.12s; }
 .xbtn.sm { width: 22px; height: 22px; }
 .xbtn:hover { background: rgba(255, 255, 255, 0.18); color: #fff; }

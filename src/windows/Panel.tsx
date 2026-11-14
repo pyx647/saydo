@@ -5,7 +5,7 @@ import {
   Maximize2, MonitorUp, Presentation, Replace, ScanText, ShieldQuestion, Sparkles, TriangleAlert, X,
 } from "lucide-react";
 import { listenSync } from "../lib/transport";
-import { api, BACKEND_NAMES, fmtSize, type CtxView, type FileView, type PanelState } from "../lib/api";
+import { api, BACKEND_NAMES, fmtSize, type ConvoList, type CtxView, type FileView, type PanelState } from "../lib/api";
 
 type AskSpec = Extract<PanelState, { phase: "ask" }>;
 type UserMsg = { id: number; role: "user"; text: string };
@@ -77,6 +77,12 @@ function reduce(st: St, s: Act): St {
       return { ...st, view: "error", msgs, nid };
     case "input":
       return { ...st, view: "input", expanded: true, ctx: s.ctx, msgs: s.hasPrev ? msgs : [], hasPrev: s.hasPrev };
+    case "resume": {
+      // 切回某段对话：只显示它最近一轮（你说的话 + 回答），之后按热键就是接着聊
+      const um: UserMsg = { id: nid++, role: "user", text: s.said };
+      const am: AsstMsg = { ...newAsst(nid++), status: "done", text: s.text, backend: s.backend };
+      return { ...st, view: "result", expanded: false, said: s.said, caption: s.said, msgs: [um, am], nid, hasPrev: true };
+    }
     case "idle":
       return { ...st, view: "hidden" };
   }
@@ -261,7 +267,42 @@ export default function Panel() {
     <div ref={cardRef} className="stack" {...handlers}>
       <div data-part className="pwin" style={{ width: 340, ["--r" as string]: chat ? "24px" : "20px" }}>
         {body}
+        {(st.view === "result" || chat) && <ConvoBar key={st.nid} />}
       </div>
+    </div>
+  );
+}
+
+// ───────────────────────── 对话切换条：切到别的对话 / 结束当前对话 ─────────────────────────
+
+/** 结果卡 / 聊天窗底部的一行：其它还开着的对话（点一下切过去）+ "结束对话"。
+ *  结束 = 这段任务彻底完事：从这里消失，面板收起；以后在 设置 → 对话 里还能请回来。 */
+function ConvoBar() {
+  const [data, setData] = useState<ConvoList | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.convoList().then((d) => alive && setData(d)).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  if (!data) return null;
+  const cur = data.items.find((c) => c.id === data.current && !c.closed);
+  const others = data.items.filter((c) => !c.closed && c.id !== data.current).slice(0, 8);
+  if (!cur && others.length === 0) return null;
+  return (
+    <div className="convo-bar">
+      <div className="convo-list">
+        {others.map((c) => (
+          <button key={c.id} className="convo-chip" title={`切换到：${c.title}（${c.app || "任务"}）`} onClick={() => api.convoResume(c.id).catch(() => {})}>
+            <span className="convo-dot" />{c.title}
+          </button>
+        ))}
+        {others.length === 0 && <span className="convo-hint">按住热键继续这段对话</span>}
+      </div>
+      {cur && (
+        <button className="convo-end" title="结束这段对话（以后可在 设置 → 对话 里重新打开）" onClick={() => api.convoClose(cur.id)}>
+          <X size={12} />结束对话
+        </button>
+      )}
     </div>
   );
 }

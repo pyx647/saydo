@@ -29,6 +29,8 @@ pub struct Session {
     /// 前台 Office 文档的描述（按下热键时并行取好）
     pub doc: Mutex<Option<String>>,
     pub doc_ready: AtomicBool,
+    /// 这一轮属于哪段对话（见 convo.rs）；追问沿用上一轮的，新任务开新的
+    pub convo: AtomicU64,
 }
 
 static CUR: OnceLock<Mutex<Option<Arc<Session>>>> = OnceLock::new();
@@ -44,6 +46,45 @@ fn run_cancel() -> &'static Mutex<Arc<AtomicBool>> {
 
 pub fn set_run_pid(pid: u32) {
     RUN_PID.store(pid, Ordering::SeqCst);
+}
+
+/// 当前正在聊的是哪段对话（没有则 0）
+pub fn current_convo() -> u64 {
+    cur().lock().unwrap().as_ref().map(|s| s.convo.load(Ordering::SeqCst)).unwrap_or(0)
+}
+
+/// 结束当前对话：丢掉当前会话（下次按热键就是全新的对话，不会再带上它的上下文）
+pub fn end_current(app: &AppHandle) {
+    cancel_current(app);
+    *cur().lock().unwrap() = None;
+}
+
+/// 切到（或请回）某段对话：把它最近一轮的结果显示在面板上，并把它设成当前会话——
+/// 之后按热键说话 / 打字就是接着这段聊。原来的前台程序和选区不再保留（切回来的对话不再碰原来的选中内容）。
+pub fn resume(app: &AppHandle, c: &crate::convo::Convo) {
+    cancel_current(app);
+    let cursor = capture::cursor_xy();
+    let s = Arc::new(Session {
+        id: 0,
+        fg: FgInfo::default(),
+        cursor,
+        sel: Mutex::new(Selection::None),
+        ready: AtomicBool::new(true),
+        rec: Mutex::new(None),
+        last: Mutex::new(Some((c.said.clone(), c.text.clone()))),
+        screen: AtomicBool::new(false),
+        shot: Mutex::new(None),
+        shot_ready: AtomicBool::new(true),
+        doc: Mutex::new(None),
+        doc_ready: AtomicBool::new(true),
+        convo: AtomicU64::new(c.id),
+    });
+    *cur().lock().unwrap() = Some(s);
+    if !ui::panel_visible(app) {
+        ui::show_panel_at(app, cursor);
+    }
+    ui::interactive(app, true);
+    ui::emit(app, json!({ "phase": "resume", "said": c.said, "text": c.text, "backend": config::get().backend }));
 }
 
 /// 取消当前进行中的一切：agent 子进程、等待中的提问、录音
@@ -170,6 +211,7 @@ pub fn on_down(app: AppHandle) {
             shot_ready: AtomicBool::new(false),
             doc: Mutex::new(None),
             doc_ready: AtomicBool::new(false),
+            convo: AtomicU64::new(prev.as_ref().filter(|_| from_self).map(|p| p.convo.load(Ordering::SeqCst)).filter(|c| *c != 0).unwrap_or_else(crate::convo::new_id)),
         });
         *cur().lock().unwrap() = Some(s.clone());
         tools::reset_allow();
@@ -360,6 +402,7 @@ pub fn panel_submit(app: AppHandle, text: String) {
                 shot_ready: AtomicBool::new(true),
                 doc: Mutex::new(None),
                 doc_ready: AtomicBool::new(true),
+                convo: AtomicU64::new(crate::convo::new_id()),
             });
             *cur().lock().unwrap() = Some(s.clone());
             s
@@ -490,6 +533,7 @@ fn run_instruction(app: &AppHandle, s: Arc<Session>, text: String) {
     match res {
         Ok(out) => {
             *s.last.lock().unwrap() = Some((text.clone(), out.text.clone()));
+            crate::convo::record(app, s.convo.load(Ordering::SeqCst), &s.fg.exe, &text, &out.text);
             history::push(app, history::Entry { ts: history::now(), instruction: text.clone(), result: out.text.clone(), backend: cfg.backend.clone(), context: ctx_label, files: out.files.clone(), ok: true });
             if !ui::panel_visible(app) {
                 ui::show_panel_at(app, s.cursor);

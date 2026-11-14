@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listenSync } from "../lib/transport";
 import {
-  AudioLines, Bot, Brain, CheckCircle2, CircleAlert, Download, History, Info, Keyboard, Loader2, MousePointerClick, Play, ShieldCheck, SlidersHorizontal, Trash2, XCircle,
+  AudioLines, Bot, Brain, CheckCircle2, CircleAlert, Download, History, Info, Keyboard, Loader2, MessageSquare, MousePointerClick, Play, ShieldCheck, SlidersHorizontal, Trash2, XCircle,
 } from "lucide-react";
 import Md from "../lib/Md";
-import { api, BACKEND_NAMES, type ApiCfg, type CliCfg, type CliInfo, type Config, type HistoryEntry } from "../lib/api";
+import { api, BACKEND_NAMES, type ApiCfg, type CliCfg, type CliInfo, type Config, type Convo, type HistoryEntry } from "../lib/api";
 
-type Tab = "general" | "backend" | "voice" | "memory" | "safety" | "history" | "about";
+type Tab = "general" | "backend" | "voice" | "memory" | "safety" | "convo" | "history" | "about";
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "general", label: "常规", icon: <SlidersHorizontal size={16} /> },
   { id: "backend", label: "后端", icon: <Bot size={16} /> },
   { id: "voice", label: "语音", icon: <AudioLines size={16} /> },
   { id: "memory", label: "记忆", icon: <Brain size={16} /> },
   { id: "safety", label: "权限与安全", icon: <ShieldCheck size={16} /> },
+  { id: "convo", label: "对话", icon: <MessageSquare size={16} /> },
   { id: "history", label: "历史", icon: <History size={16} /> },
   { id: "about", label: "使用说明", icon: <Info size={16} /> },
 ];
@@ -406,6 +407,67 @@ function fmtTime(ts: number) {
   return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// ───────────────────────── 对话：切换 / 结束 / 重新打开 ─────────────────────────
+
+function ConvoTab() {
+  const [items, setItems] = useState<Convo[] | null>(null);
+  const [cur, setCur] = useState(0);
+  const [open, setOpen] = useState<number | null>(null);
+  const [msg, setMsg] = useState("");
+  const load = useCallback(() => {
+    api.convoList().then((d) => { setItems(d?.items ?? []); setCur(d?.current ?? 0); }).catch(() => setItems([]));
+  }, []);
+  useEffect(() => {
+    load();
+    window.addEventListener("focus", load);
+    return () => window.removeEventListener("focus", load);
+  }, [load]);
+  if (!items) return null;
+  const act = async (f: () => Promise<void>) => {
+    setMsg("");
+    try { await f(); } catch (e) { setMsg(String(e)); }
+    load();
+  };
+  const live = items.filter((c) => !c.closed);
+  const ended = items.filter((c) => c.closed);
+  const row = (c: Convo) => (
+    <div key={c.id} className="s-card" style={{ padding: "12px 14px", marginBottom: 8 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer" }} onClick={() => setOpen(open === c.id ? null : c.id)}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {c.title}{c.id === cur && <span style={{ marginLeft: 8, fontSize: 11.5, color: "var(--ok)", fontWeight: 500 }}>正在聊</span>}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>{c.app || "任务"} · {c.turns} 轮 · {fmtTime(c.ts)}</div>
+        </div>
+        <button className="s-btn" onClick={(e) => { e.stopPropagation(); act(() => api.convoResume(c.id)); }}><Play size={14} /> {c.closed ? "继续对话" : "切到这段"}</button>
+        {!c.closed && <button className="s-btn" onClick={(e) => { e.stopPropagation(); act(() => api.convoClose(c.id)); }}>结束</button>}
+        <button className="s-btn" title="删除这段对话" onClick={(e) => { e.stopPropagation(); act(() => api.convoDelete(c.id)); }}><Trash2 size={14} /></button>
+      </div>
+      {open === c.id && (
+        <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.6, userSelect: "text" }}>
+          <div style={{ color: "var(--muted)", marginBottom: 6 }}>最近一轮你说：{c.said}</div>
+          <div className="md"><Md>{c.text}</Md></div>
+        </div>
+      )}
+    </div>
+  );
+  return (
+    <>
+      <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 12, lineHeight: 1.7 }}>
+        每次按热键开一个新任务 = 一段新对话。结果卡还开着时再按热键，就是接着当前这段聊。结果卡底部可以随时切到下面这些还开着的对话，
+        也可以点“结束对话”把它彻底收掉；收掉的对话会出现在下面“已结束”里，点“继续对话”就能请回来。
+      </div>
+      {msg && <div style={{ color: "var(--danger)", fontSize: 13, marginBottom: 10 }}>{msg}</div>}
+      <div style={{ fontWeight: 600, margin: "4px 0 8px" }}>进行中（{live.length}）</div>
+      {live.length === 0 && <div className="s-card" style={{ padding: 22, textAlign: "center", color: "var(--muted)", marginBottom: 8 }}>还没有对话。按住热键说一句试试。</div>}
+      {live.map(row)}
+      <div style={{ fontWeight: 600, margin: "16px 0 8px" }}>已结束（{ended.length}）</div>
+      {ended.length === 0 && <div className="s-card" style={{ padding: 22, textAlign: "center", color: "var(--muted)" }}>没有已结束的对话。</div>}
+      {ended.map(row)}
+    </>
+  );
+}
+
 function HistoryTab() {
   const [items, setItems] = useState<HistoryEntry[] | null>(null);
   const [open, setOpen] = useState<number | null>(null);
@@ -508,6 +570,7 @@ export default function Settings() {
         {tab === "voice" && <Voice cfg={cfg} patch={patch} />}
         {tab === "memory" && <Memory cfg={cfg} patch={patch} />}
         {tab === "safety" && <Safety cfg={cfg} patch={patch} />}
+        {tab === "convo" && <ConvoTab />}
         {tab === "history" && <HistoryTab />}
         {tab === "about" && <About cfg={cfg} />}
       </main>

@@ -3,6 +3,7 @@ mod audio;
 mod bridge;
 mod capture;
 mod config;
+mod convo;
 mod history;
 mod hotkey;
 mod log;
@@ -215,6 +216,10 @@ pub fn run() {
             hotkey::record_hotkey,
             history::history_list,
             history::history_clear,
+            convo::convo_list,
+            convo::convo_resume,
+            convo::convo_close,
+            convo::convo_delete,
             session::panel_submit,
             session::panel_replace,
             session::test_backend,
