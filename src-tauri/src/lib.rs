@@ -220,6 +220,7 @@ pub fn run() {
             session::test_backend,
             ui::panel_layout,
             ui::panel_drag,
+            ui::panel_cursor_inside,
             ui::panel_focus,
             debug_show,
             debug_emit,

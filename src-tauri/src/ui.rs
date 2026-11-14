@@ -235,6 +235,28 @@ pub fn panel_layout(app: AppHandle, w: f64, h: f64) {
     }
 }
 
+/// 鼠标现在是不是在面板窗口范围内。前端用它判断"悬停"：系统的指针进出事件在窗口被隐藏 / 程序不在前台时会丢，
+/// 悬停状态就会卡住；直接问鼠标位置最可靠。坐标换算和 monitor_at 一致（macOS：点；其它：物理像素）。
+#[tauri::command]
+pub fn panel_cursor_inside(app: AppHandle) -> bool {
+    let Some(w) = app.get_webview_window("panel") else { return false };
+    if !w.is_visible().unwrap_or(false) {
+        return false;
+    }
+    let (Ok(p), Ok(s)) = (w.outer_position(), w.outer_size()) else { return false };
+    let (cx, cy) = crate::capture::cursor_xy();
+    #[cfg(target_os = "macos")]
+    let (x, y, ww, hh) = {
+        let k = w.scale_factor().unwrap_or(1.0);
+        (p.x as f64 / k, p.y as f64 / k, s.width as f64 / k, s.height as f64 / k)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let (x, y, ww, hh) = (p.x as f64, p.y as f64, s.width as f64, s.height as f64);
+    let m = 6.0; // 边缘留一点余量
+    let (cx, cy) = (cx as f64, cy as f64);
+    cx >= x - m && cx < x + ww + m && cy >= y - m && cy < y + hh + m
+}
+
 /// 用户按住面板拖动
 #[tauri::command]
 pub fn panel_drag(app: AppHandle) {

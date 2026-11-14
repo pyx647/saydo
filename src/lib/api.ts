@@ -76,6 +76,7 @@ export const api = {
   replace: (text: string) => invoke<void>("panel_replace", { text }),
   layout: (l: { w: number; h: number; dpr: number; offx: number; offy: number; radius: number; parts?: { x: number; y: number; w: number; h: number; r: number }[] }) => invoke<void>("panel_layout", l),
   drag: () => invoke<void>("panel_drag"),
+  cursorInside: () => invoke<boolean>("panel_cursor_inside"),
   focus: () => invoke<void>("panel_focus"),
   autostartGet: () => invoke<boolean>("autostart_get"),
   autostartSet: (on: boolean) => invoke<void>("autostart_set", { on }),

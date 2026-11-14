@@ -174,6 +174,29 @@ export default function Panel() {
     return () => clearInterval(t);
   }, [autoCloses, st.msgs, autoClose]);
 
+  // 执行中：悬停以"鼠标真实位置"为准（每 0.2 秒问一次后端），不再依赖会丢的指针进出事件。
+  // 进入窗口范围立刻展开；离开要连续两次（约 0.4 秒）才收回，避免边缘抖动。
+  useEffect(() => {
+    if (st.view !== "working") return;
+    let outside = 0;
+    let alive = true;
+    const t = setInterval(() => {
+      api.cursorInside().then((inside) => {
+        if (!alive) return;
+        if (inside) {
+          outside = 0;
+          window.clearTimeout(leaveTimer.current);
+          hoverRef.current = true;
+          setHover(true);
+        } else if (++outside >= 2) {
+          hoverRef.current = false;
+          setHover(false);
+        }
+      }).catch(() => {});
+    }, 200);
+    return () => { alive = false; clearInterval(t); };
+  }, [st.view]);
+
   const onMouseDown = (e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
     if (e.button === 0 && t.closest("[data-drag]") && !t.closest("button,input,a")) api.drag();
@@ -182,7 +205,7 @@ export default function Panel() {
   const last = st.msgs[st.msgs.length - 1];
   const asst = last && last.role === "assistant" ? last : undefined;
   const pillKind: "listening" | "busy" | "working" | null =
-    st.view === "listening" ? "listening" : st.view === "transcribing" ? "busy" : st.view === "working" && !chat ? "working" : null;
+    st.view === "listening" ? "listening" : st.view === "transcribing" ? "busy" : st.view === "working" ? "working" : null;
   const handlers = {
     onPointerEnter: () => {
       window.clearTimeout(leaveTimer.current);
