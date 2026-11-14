@@ -152,6 +152,11 @@ pub fn ax_prompt() -> bool {
     })
 }
 
+/// 现在有没有「屏幕录制」权限（没有的话截图只有桌面壁纸）。授权后要重新打开应用才会变成 true。
+pub fn screen_capture_allowed() -> bool {
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
 /// 没有「屏幕录制」权限时请求一次（否则截图只有桌面壁纸）
 pub fn request_screen_capture() {
     unsafe {

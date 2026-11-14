@@ -93,13 +93,19 @@ pub fn grab_image(fg_hwnd: isize, cursor: (i32, i32)) -> Result<image::RgbaImage
                     continue;
                 }
                 if let Ok(i) = w.capture_image() {
-                    if i.width() > 200 && i.height() > 100 {
+                    // 跳过空白的（比如 Finder 在前台时它的"桌面层窗口"）：继续找这个程序的下一个窗口
+                    if i.width() > 200 && i.height() > 100 && !looks_blank(&i) {
                         img = Some(i);
                         break;
                     }
                 }
             }
         }
+    }
+    // 窗口截图是空白的（或根本没抓到）→ 退回截整个显示器，别把一张纯色图交给 Agent
+    if img.as_ref().map(looks_blank).unwrap_or(false) {
+        crate::log::log("screenshot: window capture is blank, falling back to the whole display");
+        img = None;
     }
     if img.is_none() {
         let mon = xcap::Monitor::from_point(cursor.0, cursor.1).map_err(|e| format!("找不到显示器: {e}"))?;
@@ -181,4 +187,46 @@ fn describe_doc(prog: &str, v: &serde_json::Value) -> Option<String> {
     }
     let shown = if path.is_empty() { "（还没保存过的新文档）".to_string() } else { format!("`{path}`") };
     Some(format!("- 前台是 {prog}，用户正在编辑的文档：{shown}（{}）\n", parts.join("；")))
+}
+// ───────────────────────── 截图质量 ─────────────────────────
+
+/// 抓到的图是不是"空白"（纯色或几乎纯色）。桌面层窗口、没有权限时的空壳、纯黑 / 纯灰都会这样；
+/// 真实界面哪怕是深色主题，按网格采样也有几十种颜色。宁可误判（多截一次整屏）也不要把空白图交给 Agent。
+pub fn looks_blank(img: &image::RgbaImage) -> bool {
+    let (w, h) = (img.width(), img.height());
+    if w == 0 || h == 0 {
+        return true;
+    }
+    let (sx, sy) = ((w / 64).max(1), (h / 64).max(1));
+    let mut seen = std::collections::HashSet::new();
+    let mut y = 0;
+    while y < h {
+        let mut x = 0;
+        while x < w {
+            let p = img.get_pixel(x, y).0;
+            // 每个通道只留高 5 位，忽略渐变 / 压缩造成的细微差别
+            seen.insert([p[0] >> 3, p[1] >> 3, p[2] >> 3, p[3] >> 3]);
+            x += sx;
+        }
+        y += sy;
+    }
+    seen.len() <= 8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{Rgba, RgbaImage};
+
+    #[test]
+    fn flat_images_are_blank() {
+        assert!(looks_blank(&RgbaImage::from_pixel(800, 600, Rgba([40, 40, 40, 255]))));
+        assert!(looks_blank(&RgbaImage::from_pixel(800, 600, Rgba([0, 0, 0, 0]))));
+    }
+
+    #[test]
+    fn real_content_is_not_blank() {
+        let img = RgbaImage::from_fn(800, 600, |x, y| Rgba([(x * 7 % 256) as u8, (y * 5 % 256) as u8, ((x + y) * 3 % 256) as u8, 255]));
+        assert!(!looks_blank(&img));
+    }
 }

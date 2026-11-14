@@ -5,8 +5,8 @@
 use crate::capture::Selection;
 
 const SCREEN_WORDS: &[&str] = &[
-    "当前页面", "这个页面", "本页", "这一页", "当前界面", "这个界面", "屏幕", "截图", "截屏", "当前窗口", "这个窗口", "当前网页", "这个网页", "网页上", "页面上", "界面上", "画面",
-    "this page", "current page", "the page", "on screen", "on the screen", "on my screen", "screenshot", "this screen", "this window", "current window", "this tab",
+    "当前页面", "这个页面", "本页", "这一页", "当前界面", "这个界面", "屏幕", "截图", "截屏", "当前窗口", "这个窗口", "当前网页", "这个网页", "网页上", "页面上", "界面上", "画面", "壁纸", "桌面背景",
+    "this page", "current page", "the page", "on screen", "on the screen", "on my screen", "screenshot", "this screen", "this window", "current window", "this tab", "wallpaper",
     "화면", "이 페이지", "현재 페이지", "스크린샷", "이 창",
 ];
 
@@ -42,6 +42,7 @@ mod tests {
     fn screen() {
         assert!(is_screen_intent("帮我看一下当前页面怎么回事"));
         assert!(is_screen_intent("What's on my screen"));
+        assert!(is_screen_intent("看看我的壁纸是哪个城市"));
         assert!(!is_screen_intent("把这个文件转成PDF"));
     }
     #[test]

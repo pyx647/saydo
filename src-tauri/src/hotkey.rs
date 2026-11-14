@@ -32,8 +32,10 @@ static MOD_SHIFT: AtomicBool = AtomicBool::new(false);
 static MOD_WIN: AtomicBool = AtomicBool::new(false);
 static PAUSED: AtomicBool = AtomicBool::new(false);
 
-static RECORD_TX: OnceLock<Mutex<Option<std::sync::mpsc::Sender<String>>>> = OnceLock::new();
-fn record_cell() -> &'static Mutex<Option<std::sync::mpsc::Sender<String>>> {
+/// 录入热键的结果通道：Ok = 录到的热键，Err = 给用户看的原因（比如"这个键不能用作热键"）
+type RecordTx = std::sync::mpsc::Sender<Result<String, String>>;
+static RECORD_TX: OnceLock<Mutex<Option<RecordTx>>> = OnceLock::new();
+fn record_cell() -> &'static Mutex<Option<RecordTx>> {
     RECORD_TX.get_or_init(|| Mutex::new(None))
 }
 
@@ -43,13 +45,35 @@ static KB_HOOK: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize:
 #[cfg(windows)]
 static MOUSE_HOOK: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
+const UNSUPPORTED_KEY_MSG: &str = "这个键不能用作热键，请换一个（字母、数字、F1–F20、空格、方向键、常用符号都可以，Esc 留给取消用）";
+
 fn vk_to_name(vk: u32) -> Option<String> {
     Some(match vk {
         0x30..=0x39 | 0x41..=0x5A => ((vk as u8) as char).to_string(),
         0x20 => "Space".into(),
         0x0D => "Enter".into(),
         0x09 => "Tab".into(),
+        0x08 => "Backspace".into(),
+        0x2E => "Delete".into(),
+        0x24 => "Home".into(),
+        0x23 => "End".into(),
+        0x21 => "PageUp".into(),
+        0x22 => "PageDown".into(),
+        0x25 => "Left".into(),
+        0x26 => "Up".into(),
+        0x27 => "Right".into(),
+        0x28 => "Down".into(),
+        0xBA => ";".into(),
+        0xBB => "=".into(),
+        0xBC => ",".into(),
+        0xBD => "-".into(),
+        0xBE => ".".into(),
+        0xBF => "/".into(),
         0xC0 => "`".into(),
+        0xDB => "[".into(),
+        0xDC => "\\".into(),
+        0xDD => "]".into(),
+        0xDE => "'".into(),
         0x70..=0x87 => format!("F{}", vk - 0x70 + 1),
         _ => return None,
     })
@@ -60,7 +84,27 @@ fn name_to_vk(name: &str) -> Option<u32> {
         "Space" => Some(0x20),
         "Enter" => Some(0x0D),
         "Tab" => Some(0x09),
+        "Backspace" => Some(0x08),
+        "Delete" => Some(0x2E),
+        "Home" => Some(0x24),
+        "End" => Some(0x23),
+        "PageUp" => Some(0x21),
+        "PageDown" => Some(0x22),
+        "Left" => Some(0x25),
+        "Up" => Some(0x26),
+        "Right" => Some(0x27),
+        "Down" => Some(0x28),
+        ";" => Some(0xBA),
+        "=" => Some(0xBB),
+        "," => Some(0xBC),
+        "-" => Some(0xBD),
+        "." => Some(0xBE),
+        "/" => Some(0xBF),
         "`" => Some(0xC0),
+        "[" => Some(0xDB),
+        "\\" => Some(0xDC),
+        "]" => Some(0xDD),
+        "'" => Some(0xDE),
         s if s.len() == 1 => {
             let c = s.chars().next()?.to_ascii_uppercase();
             c.is_ascii_alphanumeric().then_some(c as u32)
@@ -206,11 +250,18 @@ fn key_logic(vk: u32, down: bool) -> bool {
     let recording = record_cell().lock().ok().and_then(|g| g.clone());
     if let Some(tx) = recording {
         if down && !is_modifier_vk(vk) {
-            let spec = build_kb_spec(vk);
             if let Ok(mut g) = record_cell().lock() {
                 *g = None;
             }
-            let _ = tx.send(spec);
+            // 没有名字的键（比如 Esc）存下来会变成解析不了的 "VK27"，热键就废了：当场拒绝并告诉用户
+            if vk_to_name(vk).is_none() {
+                crate::log::log(&format!("hotkey: record rejected, unsupported vk={vk:#x}"));
+                let _ = tx.send(Err(UNSUPPORTED_KEY_MSG.to_string()));
+                return true;
+            }
+            let spec = build_kb_spec(vk);
+            crate::log::log(&format!("hotkey: recorded {spec}"));
+            let _ = tx.send(Ok(spec));
             return true;
         }
     } else if let Some(Spec::Keyboard { ctrl, alt, shift, win, vk: target }) = spec_cell().lock().ok().and_then(|g| g.clone()) {
@@ -248,7 +299,7 @@ fn mouse_logic(button: u16, down: bool) -> bool {
             if let Ok(mut g) = record_cell().lock() {
                 *g = None;
             }
-            let _ = tx.send(spec);
+            let _ = tx.send(Ok(spec));
             return true;
         }
     } else if matches!(spec_cell().lock().ok().and_then(|g| g.clone()), Some(Spec::Mouse(b)) if b == button) {
@@ -341,7 +392,37 @@ fn mac_vk(keycode: u16) -> Option<u32> {
         48 => Some(0x09), // Tab
         50 => Some(0xC0), // `
         53 => Some(0x1B), // Esc
+        51 => Some(0x08), // Backspace
+        117 => Some(0x2E), // Forward Delete
+        115 => Some(0x24), // Home
+        119 => Some(0x23), // End
+        116 => Some(0x21), // Page Up
+        121 => Some(0x22), // Page Down
+        123 => Some(0x25), // ←
+        126 => Some(0x26), // ↑
+        124 => Some(0x27), // →
+        125 => Some(0x28), // ↓
+        41 => Some(0xBA),  // ;
+        24 => Some(0xBB),  // =
+        43 => Some(0xBC),  // ,
+        27 => Some(0xBD),  // -
+        47 => Some(0xBE),  // .
+        44 => Some(0xBF),  // /
+        33 => Some(0xDB),  // [
+        42 => Some(0xDC),  // \
+        30 => Some(0xDD),  // ]
+        39 => Some(0xDE),  // '
         _ => None,
+    }
+}
+
+/// 录入热键时按了一个我们不认识的键：马上告诉用户，别让他干等 8 秒超时
+#[cfg(target_os = "macos")]
+fn reject_unmapped_key(keycode: u16) {
+    let tx = record_cell().lock().ok().and_then(|mut g| g.take());
+    if let Some(tx) = tx {
+        crate::log::log(&format!("hotkey: record rejected, unmapped macOS keycode {keycode}"));
+        let _ = tx.send(Err(UNSUPPORTED_KEY_MSG.to_string()));
     }
 }
 
@@ -363,7 +444,12 @@ fn on_tap(ev: crate::mac::TapEvent) -> bool {
             }
             match mac_vk(keycode) {
                 Some(vk) => key_logic(vk, down),
-                None => false,
+                None => {
+                    if down {
+                        reject_unmapped_key(keycode);
+                    }
+                    false
+                }
             }
         }
         TapEvent::Flags { flags } => {
@@ -416,11 +502,58 @@ pub fn install(app: &AppHandle) {
 
 #[tauri::command]
 pub async fn record_hotkey() -> Result<String, String> {
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    // 没有「辅助功能」权限时系统根本不会把按键交给 SayDo，录入只会白等 8 秒：直接说清楚
+    #[cfg(target_os = "macos")]
+    {
+        if !crate::mac::ax_trusted() {
+            return Err("没有「辅助功能」权限，系统不会把按键交给 SayDo（系统设置 → 隐私与安全性 → 辅助功能 里勾选 SayDo）".to_string());
+        }
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
     *record_cell().lock().unwrap() = Some(tx);
     let r = tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(8)))
         .await
         .map_err(|e| e.to_string())?;
     *record_cell().lock().unwrap() = None;
-    r.map_err(|_| "超时：8 秒内没检测到按键或鼠标侧键".to_string())
+    match r {
+        Ok(result) => result,
+        Err(_) => Err("超时：8 秒内没检测到按键或鼠标侧键".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_named_key_round_trips() {
+        for vk in 0u32..=0xFF {
+            if let Some(name) = vk_to_name(vk) {
+                assert_eq!(name_to_vk(&name), Some(vk), "key name {name:?} (vk {vk:#x}) must parse back to the same key");
+            }
+        }
+    }
+
+    #[test]
+    fn specs_parse() {
+        assert_eq!(parse_spec("Alt+Space"), Some(Spec::Keyboard { ctrl: false, alt: true, shift: false, win: false, vk: 0x20 }));
+        assert_eq!(parse_spec("Ctrl+Shift+Left"), Some(Spec::Keyboard { ctrl: true, alt: false, shift: true, win: false, vk: 0x25 }));
+        assert_eq!(parse_spec("Cmd+\\"), Some(Spec::Keyboard { ctrl: false, alt: false, shift: false, win: true, vk: 0xDC }));
+        assert_eq!(parse_spec("Mouse:XButton1"), Some(Spec::Mouse(1)));
+        // 解析不了的名字（以前录入 Esc 会存成 "VK27"）不能当成有效热键
+        assert_eq!(parse_spec("Alt+VK27"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_keys_map_to_named_keys() {
+        // 每个能录到的 macOS 键码，要么没有映射（会被拒绝），要么映射出来就必须有名字（Esc 除外，它留给取消）
+        for code in 0u16..128 {
+            if let Some(vk) = mac_vk(code) {
+                if vk != 0x1B {
+                    assert!(vk_to_name(vk).is_some(), "macOS keycode {code} maps to vk {vk:#x} which has no name");
+                }
+            }
+        }
+    }
 }

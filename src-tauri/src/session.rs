@@ -402,6 +402,17 @@ fn run_instruction(app: &AppHandle, s: Arc<Session>, text: String) {
     let saved: Option<PathBuf> = s.shot.lock().unwrap().clone().filter(|p| p.exists());
     let mut shot_saved = saved.clone();
     if router::is_screen_intent(&text) {
+        // macOS 没有「屏幕录制」权限时，截到的只有桌面壁纸或空白：直接说清楚，别让 Agent 对着一张空图瞎答
+        #[cfg(target_os = "macos")]
+        {
+            if !crate::mac::screen_capture_allowed() {
+                crate::mac::request_screen_capture();
+                return ui::emit_error(
+                    app,
+                    "SayDo 没有「屏幕录制」权限，截不到屏幕内容：请在 系统设置 → 隐私与安全性 → 屏幕录制 里打开 SayDo，然后退出并重新打开 SayDo",
+                );
+            }
+        }
         ui::emit(app, json!({ "phase": "working", "steps": ["读取当前屏幕…"], "stepCount": 1, "text": "", "elapsed": 0 }));
         let mut got = saved.clone();
         if got.is_none() {
